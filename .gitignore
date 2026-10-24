@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+data/*
+!data/.gitkeep
+.env
+rust/chain-worker/target/
+.idea/
+*.egg-info/
+

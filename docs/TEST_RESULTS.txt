@@ -1,0 +1,15 @@
+Lapidus Vault Systems audit — 2026-10-22
+Audited Python package version: 0.1.1 (runtime source unchanged from starter v0.1)
+
+RUN: python -m pytest -q
+RESULT: 10 passed in 0.11 seconds
+DETAIL: 7 original offline unit tests + 3 added offline CLI/SQLite integration tests
+RUN: python -m compileall -q src tests
+RESULT: passed
+RUN: python -m lapidus_vaults --help
+RESULT: passed
+RUN: python -m lapidus_vaults list --chain 8453 --limit 3
+RESULT: failed with DNS resolution error (runtime/network access unavailable)
+RUST: Cargo/rustc not installed; compile not verified
+
+IMPORTANT: All tests were local/offline. No live capital, wallet address, or signing key has been used.
