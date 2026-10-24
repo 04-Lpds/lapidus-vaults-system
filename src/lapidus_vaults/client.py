@@ -60,6 +60,25 @@ class MorphoClient:
             raise MorphoAPIError(f"Unexpected vault state for {selector}")
         return response["data"]
 
+    def v2_config(self, chain_id: int, vault_address: str) -> dict[str, Any]:
+        """Detailed identity, token decimals, fees and gates of a single V2 vault."""
+        selector = f"{chain_id}:{vault_address}"
+        response = self._get(f"/v0/vaults-v2/{selector}")
+        if not isinstance(response["data"], dict):
+            raise MorphoAPIError(f"Unexpected vault configuration for {selector}")
+        return response["data"]
+
+    def v2_apy(self, chain_id: int, vault_address: str, *, lookback: str = "seven_days") -> dict[str, Any]:
+        """Historical realized share-price APY, NOT a forecast or guaranteed yield."""
+        allowed = {"one_hour", "six_hours", "one_day", "seven_days", "thirty_days", "ninety_days", "one_year", "inception"}
+        if lookback not in allowed:
+            raise ValueError(f"Unsupported APY lookback: {lookback}")
+        selector = f"{chain_id}:{vault_address}"
+        response = self._get(f"/v1/vaults-v2/{selector}/apy-averages", lookback=lookback)
+        if not isinstance(response["data"], dict):
+            raise MorphoAPIError(f"Unexpected vault APY for {selector}")
+        return response["data"]
+
     def close(self) -> None:
         if self._owns_client:
             self.http.close()

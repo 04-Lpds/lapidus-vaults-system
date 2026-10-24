@@ -8,4 +8,3 @@ data/*
 rust/chain-worker/target/
 .idea/
 *.egg-info/
-

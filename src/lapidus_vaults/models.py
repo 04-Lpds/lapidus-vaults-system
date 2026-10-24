@@ -5,6 +5,20 @@ from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Any
 
+UINT256_MAX = 2**256 - 1
+
+def strict_uint(value: Any, field: str) -> int:
+    """Accept exact uint256 values only; int(3.9), bools and signs are forbidden."""
+    if type(value) is int:
+        result = value
+    elif isinstance(value, str) and value.isascii() and value.isdecimal():
+        result = int(value)
+    else:
+        raise ValueError(f"{field} must be an exact unsigned integer (int or digit string)")
+    if not 0 <= result <= UINT256_MAX:
+        raise ValueError(f"{field} outside uint256 range")
+    return result
+
 @dataclass(frozen=True)
 class VaultSnapshot:
     chain_id: int
@@ -22,7 +36,7 @@ class VaultSnapshot:
     @classmethod
     def from_api(cls, data: dict[str, Any], *, name: str="", asset_address: str="", observed_at: str | None=None) -> "VaultSnapshot":
         try:
-            ints = {key: int(data[key]) for key in (
+            ints = {key: strict_uint(data[key], key) for key in (
                 "chain_id", "last_indexed_block", "total_assets", "total_supply",
                 "withdrawable_assets", "allocated_assets", "idle_assets"
             )}

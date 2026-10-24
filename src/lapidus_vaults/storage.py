@@ -24,6 +24,20 @@ CREATE TABLE IF NOT EXISTS vault_snapshots (
     raw_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_vault_time ON vault_snapshots(chain_id, vault_address, id DESC);
+CREATE TABLE IF NOT EXISTS vault_screenings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    chain_id INTEGER NOT NULL,
+    vault_address TEXT NOT NULL,
+    name TEXT NOT NULL,
+    source_block INTEGER NOT NULL,
+    apy_seven_days TEXT,
+    withdrawable_fraction TEXT,
+    preliminary_pass INTEGER NOT NULL,
+    problems_json TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_screenings_vault_time ON vault_screenings(chain_id, vault_address, id DESC);
 """
 
 class SnapshotStore:
@@ -43,6 +57,24 @@ class SnapshotStore:
                 f"INSERT INTO vault_snapshots ({', '.join(fields)}, raw_json) VALUES ({', '.join('?' for _ in fields)}, ?)",
                 [*values, json.dumps(raw_data, sort_keys=True)],
             )
+
+    def insert_screening(self, *, assessment: Any, listing: dict[str, Any], state: dict[str, Any],
+                         config: dict[str, Any], apy: dict[str, Any]) -> None:
+        """Persist a read-only preliminary screening with its source API responses."""
+        from datetime import datetime, timezone
+        observed_at = datetime.now(timezone.utc).isoformat()
+        with self.conn:
+            self.conn.execute("""INSERT INTO vault_screenings (
+                observed_at, chain_id, vault_address, name, source_block, apy_seven_days,
+                withdrawable_fraction, preliminary_pass, problems_json, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+                observed_at, assessment.chain_id, assessment.vault_address, assessment.name,
+                assessment.source_block,
+                None if assessment.apy is None else str(assessment.apy),
+                None if assessment.withdrawable_fraction is None else str(assessment.withdrawable_fraction),
+                int(assessment.preliminary_pass), json.dumps(assessment.problems),
+                json.dumps({"listing": listing, "state": state, "config": config, "apy": apy}, sort_keys=True),
+            ))
 
     def latest(self) -> list[sqlite3.Row]:
         return self.conn.execute("""

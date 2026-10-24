@@ -1,0 +1,7 @@
+{
+  "chain_id": 8453,
+  "asset_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "approved_vault_addresses": [],
+  "idle_fraction": "0.20",
+  "per_vault_max_fraction": "0.40"
+}

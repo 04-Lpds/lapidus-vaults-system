@@ -64,3 +64,8 @@ The worker outputs `{"chain_id":8453,"latest_block":...}` after connecting, and 
 - [Get V2 vault state](https://docs.morpho.org/api/vaults-v2/get-v2-vault-state/)
 - [Vault V2 roles](https://docs.morpho.org/curate/concepts/roles/)
 - [Alloy Rust EVM tooling](https://alloy.rs/)
+
+
+## v0.2 read-only MVP preview
+
+New: `screen` fetches Morpho V2 configuration, state and historical APY and stores a preliminary screening in SQLite; `plan` generates a hypothetical, capped, equal-weight USDC allocation across explicitly allowlisted vaults, with an idle reserve. This does not trade or measure genuine risk-adjusted yield. See `docs/MVP_PREVIEW_v0.2.md` for setup, limitations and commands.
