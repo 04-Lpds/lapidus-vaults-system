@@ -116,6 +116,9 @@ def test_screen_and_plan_cli_with_mock_api(tmp_path, monkeypatch, capsys):
         assert cli.main(['plan', '--capital-usdc', '200', '--allowlist', str(policy)]) == 0
         output = capsys.readouterr().out
         assert '80.000000' in output and '40.000000' in output
+        assert 'TOTAL PORTFOLIO: 200.000000 USDC' in output
+        assert 'ALLOCATED USDC: 160.000000' in output
+        assert 'Sample (' in output
     finally:
         client.http.close()
 

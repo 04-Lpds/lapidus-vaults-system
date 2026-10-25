@@ -1,6 +1,6 @@
 # Lapidus Vault Systems
 
-**Read-only Morpho Vault V2 data collector — read-only milestone M1 starter, audited 22 October 2026**
+**Read-only Morpho Vault V2 research system — v0.3-alpha2 exposure + portfolio look-through increment (24 October 2026)**
 
 Prototype of a Python/Rust DeFi vault monitoring, risk research and eventual controlled-automation platform. This repository **does not trade, sign transactions, or hold any private keys**. It is deliberately not a production execution system.
 
@@ -12,10 +12,10 @@ Read `docs/Lapidus_Vault_Systems_Project_Blueprint_v0.2.docx` for the latest blu
 - Preserves token values as base-unit integers; validates response structure and vault identity.
 - Persists append-only state snapshots with raw JSON in SQLite.
 - Prints observed idle and reported withdrawable shares of total assets.
-- Includes 10 offline tests: mocked HTTP, real temporary SQLite persistence, and end-to-end CLI integration.
+- Includes 55 passing offline tests in this development increment (mock HTTP, SQLite persistence, screening/plan, and exposures).
 - Contains a separate **read-only Rust/Alloy RPC probe** (source provided; requires Cargo dependencies).
 
-**Not implemented**: adapter look-through, portfolio aggregation, market credit-loss modeling, RPC source/indexer lag reconciliation, permissioned operations, transaction simulation, wallet signing, production logging. The API-reported withdrawable amount is NOT a promise of an executable withdrawal.
+**Not implemented**: complete recursive adapter look-through, market credit-loss modeling, API-vs-RPC indexer lag reconciliation, permissioned operations, transaction simulation, wallet signing, production logging. A first-level, incomplete market exposure inventory is included; nested vaults are flagged, not silently ignored. The API-reported withdrawable amount is NOT a promise of an executable withdrawal.
 
 ## Quick start: Python
 
@@ -29,6 +29,7 @@ pytest -q
 python -m lapidus_vaults list --chain 8453 --limit 10
 python -m lapidus_vaults collect --chain 8453 --limit 3
 python -m lapidus_vaults report
+python -m lapidus_vaults exposures --vault 0x050cE30b927Da55177A4914EC73480238BAD56f0
 ```
 
 To constrain discovery to a specific stablecoin, use `--asset-address 0x...` with the correct token address on the selected chain; verify token contracts independently. The directory covers **listed** V2 vaults only, not all deployed vaults. Do not assume that the first N vaults are liquid, mature, or safe.
@@ -47,6 +48,20 @@ cargo run
 ```
 
 The worker outputs `{"chain_id":8453,"latest_block":...}` after connecting, and refuses an unexpected chain ID. **It cannot sign anything.** The Rust source follows current [Alloy 2.x](https://alloy.rs/) provider examples; it has not been compiled in the document authoring environment because Cargo is unavailable there.
+
+## CLI commands (read-only)
+
+| Command | Function |
+|---|---|
+| `list` | Discover listed Morpho Vault V2s |
+| `collect` | Collect current state and append SQLite snapshot |
+| `report` | Display latest stored state snapshots |
+| `screen` | Mechanical APY/configuration/liquidity pre-screening |
+| `plan` | Hypothetical equal-weight allocations to locally allowlisted vaults; idle reserve |
+| `exposures` | Inspect documented GraphQL adapter and underlying market positions for selected vaults; nested vaults marked unresolved |
+| `portfolio-exposures` | Analyze saved paper allocations across previously recorded vault market positions (offline) |
+
+For supported options use `python -m lapidus_vaults COMMAND --help`.
 
 ## Next build tasks
 
@@ -69,3 +84,23 @@ The worker outputs `{"chain_id":8453,"latest_block":...}` after connecting, and 
 ## v0.2 read-only MVP preview
 
 New: `screen` fetches Morpho V2 configuration, state and historical APY and stores a preliminary screening in SQLite; `plan` generates a hypothetical, capped, equal-weight USDC allocation across explicitly allowlisted vaults, with an idle reserve. This does not trade or measure genuine risk-adjusted yield. See `docs/MVP_PREVIEW_v0.2.md` for setup, limitations and commands.
+
+## v0.3-alpha: exposure inventory
+
+`exposures --vault ADDRESS` queries a Vault V2's current adapters and its direct Morpho Blue market positions using the public Morpho GraphQL API. It stores immutable source observations and indicates where nested adapters or truncated results prevent full risk look-through. **This is not yet a risk score or investment decision.** See `docs/V0.3_EXPOSURES_ALPHA.md` for limitations and workflow.
+
+## v0.3-alpha2: persisted paper portfolio look-through
+
+`plan` now persists its hypothetical USDC allocations in SQLite and prints a paper plan ID.
+If you already have exposure snapshots for every allocated vault, analyze them **offline**:
+
+```powershell
+python -m lapidus_vaults portfolio-exposures
+# Or pick an older plan:
+python -m lapidus_vaults portfolio-exposures --plan-id 1 --max-age-hours 48
+```
+
+This saves a portfolio analysis with source snapshot IDs; it reports market-level and
+collateral-backed USDC lending concentrations, market HHI (deployed positions only),
+wallet idle and vault-internal idle separately. It is not a trading or credit-risk model.
+See `docs/V0.3_PORTFOLIO_LOOKTHROUGH.md`.
