@@ -31,6 +31,13 @@ class FakeRPC:
         self.simulated = []
         self.revert = False
 
+    def gas_price_wei(self):
+        return 100_000_000
+
+    def estimate_gas(self, sender, contract, data):
+        assert sender == W
+        return 150_000
+
     def chain_id(self):
         return BASE_CHAIN
 
@@ -101,3 +108,16 @@ def test_demo_and_wrong_chain_rejected():
     rpc.chain_id = lambda: 1
     with pytest.raises(Exception, match='Wrong chain'):
         preflight(original, rpc)
+
+
+def test_gas_budget_blocks_insufficient_eth():
+    rpc = FakeRPC()
+    rpc.eth = 2_001_000_000_000_000
+    assert all(c.status == 'BLOCKED' for c in preflight(plan(), rpc))
+
+
+def test_gas_estimate_failure_blocks():
+    rpc = FakeRPC()
+    from lapidus_vaults.rpc_verify import RPCError
+    rpc.estimate_gas = lambda *args: (_ for _ in ()).throw(RPCError('cannot estimate'))
+    assert all(c.status == 'BLOCKED' for c in preflight(plan(), rpc))
