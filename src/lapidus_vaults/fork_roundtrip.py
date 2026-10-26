@@ -72,11 +72,19 @@ class ForkRPC:
     def balance(self, token: str, holder: str) -> int:
         return self.uint(token, BALANCE_OF + addr_word(holder))
 
-    def transact(self, contract: str, sender: str, data: str) -> dict:
+    def transact(self, contract: str, sender: str, data: str, *, step: str) -> dict:
         txid = self.call("eth_sendTransaction", [{"from": sender, "to": contract, "data": data, "gas": hex(6_000_000)}])
         receipt = self.call("eth_getTransactionReceipt", [txid])
-        if not receipt or int(receipt.get("status", "0x0"), 16) != 1:
-            raise RuntimeError("Local-fork transaction reverted or receipt unavailable")
+        if not receipt:
+            raise RuntimeError(f"{step}: receipt unavailable for local tx {txid}")
+        if int(receipt.get("status", "0x0"), 16) != 1:
+            gas = receipt.get("gasUsed", "unknown")
+            try:
+                self.call("eth_call", [{"from": sender, "to": contract, "data": data}, "latest"])
+                reason = "historical revert reason unavailable (post-state eth_call succeeded)"
+            except RuntimeError:
+                reason = "post-state eth_call reverted (RPC did not expose revert details)"
+            raise RuntimeError(f"{step}: local tx reverted; hash={txid}, gasUsed={gas}; {reason}")
         return receipt
 
 
@@ -100,15 +108,15 @@ def run_fork_test(rpc: ForkRPC, vault: str, amount: int, *, usdc_holder: str):
     rpc.call("anvil_setBalance", [usdc_holder, hex(10**18)])
     rpc.call("anvil_impersonateAccount", [usdc_holder])
     try:
-        rpc.transact(BASE_USDC, usdc_holder, "0xa9059cbb" + addr_word(ACTOR) + word(amount))
+        rpc.transact(BASE_USDC, usdc_holder, "0xa9059cbb" + addr_word(ACTOR) + word(amount), step="fund test account via USDC transfer")
     finally:
         rpc.call("anvil_stopImpersonatingAccount", [usdc_holder])
     before_usdc = rpc.balance(BASE_USDC, ACTOR)
     before_shares = rpc.balance(vault, ACTOR)
     if before_usdc < amount:
         raise RuntimeError("Fork funding transfer did not succeed")
-    approval = rpc.transact(BASE_USDC, ACTOR, APPROVE + addr_word(vault) + word(amount))
-    deposit = rpc.transact(vault, ACTOR, DEPOSIT + word(amount) + addr_word(ACTOR))
+    approval = rpc.transact(BASE_USDC, ACTOR, APPROVE + addr_word(vault) + word(amount), step="approve vault USDC")
+    deposit = rpc.transact(vault, ACTOR, DEPOSIT + word(amount) + addr_word(ACTOR), step="deposit USDC into vault")
     after_deposit_shares = rpc.balance(vault, ACTOR)
     minted = after_deposit_shares - before_shares
     if minted <= 0:
@@ -117,7 +125,7 @@ def run_fork_test(rpc: ForkRPC, vault: str, amount: int, *, usdc_holder: str):
     if before_usdc - after_deposit_usdc != amount:
         raise RuntimeError("Deposit USDC balance reconciliation failed")
     # Withdraw at most original deposit; fees/rounding may restrict withdrawable assets.
-    withdrawal = rpc.transact(vault, ACTOR, WITHDRAW + word(amount) + addr_word(ACTOR) + addr_word(ACTOR))
+    withdrawal = rpc.transact(vault, ACTOR, WITHDRAW + word(amount) + addr_word(ACTOR) + addr_word(ACTOR), step="withdraw USDC from vault")
     final_usdc = rpc.balance(BASE_USDC, ACTOR)
     final_shares = rpc.balance(vault, ACTOR)
     if final_usdc - after_deposit_usdc != amount or final_shares > after_deposit_shares:
