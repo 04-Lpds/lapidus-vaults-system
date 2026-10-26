@@ -23,7 +23,8 @@ PREVIEW_DEPOSIT = "0xef8b30f7"
 PREVIEW_WITHDRAW = "0x0a28a477"
 DEPOSIT = "0x6e553f65"
 WITHDRAW = "0xb460af94"
-MIN_ETH_RESERVE_WEI = 2_000_000_000_000_000  # 0.002 ETH; policy floor, not gas estimate
+MIN_ETH_RESERVE_WEI = 2_000_000_000_000_000  # 0.002 ETH; configured minimum reserve
+GAS_MULTIPLIER = 2  # conservative budget buffer; not a guarantee
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,15 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
     block, wallet = snap.rpc_block, snap.wallet_address
     eth = rpc.eth_balance(wallet, block)
     results = []
+    # Gas quotations use latest-node state and must not be presented as pinned.
+    gas_price = None
+    if any(c.delta_units for c in preview.changes):
+        try:
+            gas_price = rpc.gas_price_wei()
+            if gas_price <= 0:
+                gas_price = None
+        except (RPCError, ValueError):
+            gas_price = None
     for change in preview.changes:
         action = 'DEPOSIT' if change.delta_units > 0 else 'WITHDRAW' if change.delta_units < 0 else 'HOLD'
         amount = abs(change.delta_units)
@@ -66,7 +76,9 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
             results.append(Check(vault, action, 0, 'NO_ACTION', ('No change requested',)))
             continue
         if eth < min_eth_reserve_wei:
-            notes.append('ETH below configured reserve; gas cost NOT estimated')
+            notes.append('ETH below configured reserve')
+        if gas_price is None:
+            notes.append('RPC CHECK FAILED: gas price unavailable')
         if action == 'DEPOSIT':
             # Standalone feasibility, not a multi-step simulation. Existing USDC only.
             if snap.wallet_usdc_units < amount:
@@ -86,6 +98,11 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
                     data = DEPOSIT + _word(amount) + _address_word(wallet)
                     _returned_uint(rpc.simulate_call(wallet, vault, data, block))
                     notes.append('Individual deposit eth_call returned successfully')
+                    estimate = rpc.estimate_gas(wallet, vault, data)
+                    budget = estimate * gas_price * GAS_MULTIPLIER
+                    notes.append(f'Latest-state gas estimate {estimate}, fee quote {gas_price} wei/gas; 2x budget {budget} wei')
+                    if eth < min_eth_reserve_wei + budget:
+                        notes.append('Insufficient ETH for reserved gas budget')
             except (RPCError, ValueError) as exc:
                 notes.append(f'RPC CHECK FAILED: {type(exc).__name__}')
         else:
@@ -102,6 +119,11 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
                     data = WITHDRAW + _word(amount) + _address_word(wallet) + _address_word(wallet)
                     _returned_uint(rpc.simulate_call(wallet, vault, data, block))
                     notes.append('Individual withdraw eth_call returned successfully')
+                    estimate = rpc.estimate_gas(wallet, vault, data)
+                    budget = estimate * gas_price * GAS_MULTIPLIER
+                    notes.append(f'Latest-state gas estimate {estimate}, fee quote {gas_price} wei/gas; 2x budget {budget} wei')
+                    if eth < min_eth_reserve_wei + budget:
+                        notes.append('Insufficient ETH for reserved gas budget')
             except (RPCError, ValueError, StopIteration) as exc:
                 notes.append(f'RPC CHECK FAILED: {type(exc).__name__}')
         blockers = ('below', 'Insufficient', 'FAILED', 'zero shares')
@@ -132,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f'{check.vault} {check.action} {display_usdc(check.requested_assets)} USDC: {check.status}')
             for note in check.observations:
                 print(f'  - {note}')
-        print('NO SIGNING OR BROADCAST. Individual historical eth_call only; no gas estimate,')
+        print('NO SIGNING OR BROADCAST. Individual historical eth_call only; no sequential gas budgeting,')
         print('no sequential state simulation, no slippage limits, no investment approval.')
         return 2 if any(c.status == 'BLOCKED' for c in checks) else 0
     except (OSError, ValueError, RPCError, MorphoAPIError) as exc:
