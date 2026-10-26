@@ -91,7 +91,8 @@ def main(argv=None) -> int:
         return 0
     except (ValueError, OSError, RPCError, MorphoAPIError) as exc:
         # Never echo external RPC endpoint or provider credentials.
-        print(f"READ-ONLY PLAN FAILED: {type(exc).__name__} (check parameters, RPC state and API synchronization)", file=sys.stderr)
+        detail = str(exc) if isinstance(exc, ValueError) else "check connectivity or provider/API synchronization"
+        print(f"READ-ONLY PLAN FAILED: {type(exc).__name__}: {detail}", file=sys.stderr)
         return 1
 
 
