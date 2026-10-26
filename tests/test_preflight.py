@@ -68,7 +68,7 @@ class FakeRPC:
 def test_independent_actions_pass():
     rpc = FakeRPC()
     checks = preflight(plan(), rpc)
-    assert [(c.action, c.status) for c in checks] == [('WITHDRAW', 'STATIC_PASS_LIMITS_UNVERIFIED'), ('DEPOSIT', 'STATIC_PASS')]
+    assert [(c.action, c.status) for c in checks] == [('WITHDRAW', 'STATIC_PASS_LIMITS_UNVERIFIED'), ('DEPOSIT', 'STATIC_PASS_LIMITS_UNVERIFIED')]
     assert len(rpc.simulated) == 2
     assert any('Morpho V2 maxDeposit' in n for n in checks[1].observations)
     assert any('Morpho V2 maxWithdraw' in n for n in checks[0].observations)
