@@ -48,6 +48,7 @@ class FakeRPC:
     def call_uint(self, contract, selector, block, *args):
         assert block == 100
         return {
+            '0xf1c7a58b': 10**12,
             '0xdd62ed3e': self.allowance,
             '0x402d267d': self.max_deposit,
             '0xce96cb77': self.max_withdraw,
@@ -67,12 +68,15 @@ class FakeRPC:
 def test_independent_actions_pass():
     rpc = FakeRPC()
     checks = preflight(plan(), rpc)
-    assert [(c.action, c.status) for c in checks] == [('WITHDRAW', 'STATIC_PASS'), ('DEPOSIT', 'STATIC_PASS')]
+    assert [(c.action, c.status) for c in checks] == [('WITHDRAW', 'STATIC_PASS_LIMITS_UNVERIFIED'), ('DEPOSIT', 'STATIC_PASS')]
     assert len(rpc.simulated) == 2
+    assert any('Morpho V2 maxDeposit' in n for n in checks[1].observations)
+    assert any('Morpho V2 maxWithdraw' in n for n in checks[0].observations)
+    assert any('L1 bound' in n for n in checks[1].observations)
 
 
 @pytest.mark.parametrize('attribute,value', [
-    ('eth', 0), ('allowance', 0), ('max_deposit', 0), ('max_withdraw', 0),
+    ('eth', 0), ('allowance', 0),
 ])
 def test_blockers_fail_closed(attribute, value):
     rpc = FakeRPC()
