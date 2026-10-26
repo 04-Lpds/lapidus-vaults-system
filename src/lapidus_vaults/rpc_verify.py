@@ -170,15 +170,19 @@ def _difference_bps(a: int, b: int) -> Decimal:
 
 def verify_one(rpc: ReadOnlyRPC, morpho: MorphoClient, vault: str, *, block: int,
                wallet: str | None = None, max_lag_blocks: int = 150,
-               amount_diff_tolerance_bps: int = 20) -> Verification:
+               amount_diff_tolerance_bps: int = 20,
+               api_config: dict[str, Any] | None = None,
+               api_state: dict[str, Any] | None = None) -> Verification:
     """Compare API observations to pinned-block on-chain reads, with explicit caveats."""
     if not address_ok(vault) or (wallet is not None and not address_ok(wallet)):
         raise ValueError('Vault/wallet must be valid 20-byte EVM addresses')
     if block < 0 or max_lag_blocks < 0 or not 0 <= amount_diff_tolerance_bps <= 1000:
         raise ValueError('Invalid block or threshold')
 
-    config = morpho.v2_config(BASE_CHAIN, vault)
-    state = morpho.v2_state(BASE_CHAIN, vault)
+    # A portfolio can fetch all indexed API observations before pinning the RPC block.
+    # Otherwise a later API read can naturally be ahead of an earlier pinned block.
+    config = api_config if api_config is not None else morpho.v2_config(BASE_CHAIN, vault)
+    state = api_state if api_state is not None else morpho.v2_state(BASE_CHAIN, vault)
     if (str(config.get('address', '')).lower() != vault.lower() or
             strict_uint(config.get('chain_id'), 'config.chain_id') != BASE_CHAIN or
             str(state.get('address', '')).lower() != vault.lower() or
@@ -205,7 +209,7 @@ def verify_one(rpc: ReadOnlyRPC, morpho: MorphoClient, vault: str, *, block: int
     rpc_shares = rpc.call_uint(vault, TOTAL_SUPPLY, block)
     notes: list[str] = []
     if indexed > block:
-        notes.append('API indexed block is ahead of chosen RPC block; incomparable state')
+        notes.append(f'API indexed block {indexed} is ahead of RPC block {block} by {indexed-block} blocks; try again or use a synchronized RPC provider')
     elif block - indexed > max_lag_blocks:
         notes.append(f'API indexer is {block-indexed} blocks behind RPC (limit {max_lag_blocks})')
     if _difference_bps(rpc_assets, api_assets) > amount_diff_tolerance_bps:
