@@ -94,7 +94,7 @@ class ReadOnlyRPC:
         self.close()
 
     def request(self, method: str, params: list[Any]) -> Any:
-        if method not in {'eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call'}:
+        if method not in {'eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance'}:
             raise ValueError('Only read-only JSON-RPC methods are permitted')
         self._next_id += 1
         try:
@@ -119,6 +119,20 @@ class ReadOnlyRPC:
 
     def block_number(self) -> int:
         return _hex_uint(self.request('eth_blockNumber', []), 'block_number')
+
+    def eth_balance(self, addr: str, block: int) -> int:
+        if not address_ok(addr) or type(block) is not int or block < 0:
+            raise ValueError('Invalid address or block')
+        return _hex_uint(self.request('eth_getBalance', [addr, hex(block)]), 'ETH balance')
+
+    def simulate_call(self, sender: str, contract: str, calldata: str, block: int) -> str:
+        """Pinned eth_call from an address; never signs or broadcasts."""
+        if not address_ok(sender) or not address_ok(contract) or type(block) is not int or block < 0:
+            raise ValueError('Invalid simulation address/block')
+        if not isinstance(calldata, str) or not calldata.startswith('0x') or len(calldata) % 2:
+            raise ValueError('Invalid simulation calldata')
+        bytes.fromhex(calldata[2:])
+        return self.request('eth_call', [{'from': sender, 'to': contract, 'data': calldata}, hex(block)])
 
     def contract_exists(self, addr: str, block: int) -> bool:
         code = self.request('eth_getCode', [addr, hex(block)])
