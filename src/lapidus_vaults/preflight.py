@@ -94,7 +94,7 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
                     notes.append('maxDeposit below requested amount')
                 if shares == 0:
                     notes.append('previewDeposit returned zero shares')
-                if not any(('Insufficient' in x or 'below' in x or 'zero shares' in x) for x in notes):
+                if not any(('Insufficient' in x or 'below' in x or 'zero shares' in x or 'FAILED' in x) for x in notes):
                     data = DEPOSIT + _word(amount) + _address_word(wallet)
                     _returned_uint(rpc.simulate_call(wallet, vault, data, block))
                     notes.append('Individual deposit eth_call returned successfully')
@@ -115,7 +115,7 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
                     notes.append('maxWithdraw below requested amount (liquidity or limits)')
                 if shares > held:
                     notes.append('Insufficient vault shares for requested withdrawal')
-                if not any(('below' in x or 'Insufficient' in x) for x in notes):
+                if not any(('below' in x or 'Insufficient' in x or 'FAILED' in x) for x in notes):
                     data = WITHDRAW + _word(amount) + _address_word(wallet) + _address_word(wallet)
                     _returned_uint(rpc.simulate_call(wallet, vault, data, block))
                     notes.append('Individual withdraw eth_call returned successfully')
