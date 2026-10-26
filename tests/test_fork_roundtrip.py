@@ -57,3 +57,18 @@ def test_failed_receipt_reports_step():
             raise AssertionError(method)
     with pytest.raises(RuntimeError, match="deposit USDC into vault: local tx reverted"):
         ForkRPC.transact(FailedNode(), VAULTS[0], "0x" + "a"*40, "0x6e553f65", step="deposit USDC into vault")
+
+
+def test_pending_receipt_eventually_mined():
+    from lapidus_vaults.fork_roundtrip import ForkRPC
+    class Delayed:
+        receipts = 0
+        def call(self, method, params):
+            if method == "eth_sendTransaction": return "0xabc"
+            if method == "eth_getTransactionReceipt":
+                self.receipts += 1
+                return None if self.receipts == 1 else {"status": "0x1", "gasUsed": "0x5208"}
+            raise AssertionError(method)
+    node = Delayed()
+    receipt = ForkRPC.transact(node, VAULTS[0], "0x" + "a"*40, "0x6e553f65", step="test transfer")
+    assert receipt["status"] == "0x1" and node.receipts == 2
