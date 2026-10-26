@@ -66,3 +66,17 @@ def test_malformed_changes_block():
         build_safety_plan(bad, allowances={v: 0 for v in VAULTS},
                           max_gas_units=600_000, gas_price_wei=10_000_000,
                           available_eth_wei=10**17)
+
+
+def test_empty_unfunded_portfolio_needs_no_eth():
+    policy = Policy(VAULTS, Decimal("0.20"), Decimal("0.40"))
+    snapshot = WalletSnapshot(
+        ACTOR, 8453, 123, 0,
+        tuple(VaultHolding(v, 0, 0, 0, 0, 0) for v in VAULTS),
+        "demo", "demo")
+    preview = build_rebalance(snapshot, policy)
+    output = build_safety_plan(preview, allowances={v: 0 for v in VAULTS},
+        max_gas_units=600_000, gas_price_wei=10_000_000,
+        available_eth_wei=0, l1_fee_budget_wei=10**13)
+    assert output.actions == ()
+    assert output.projected_cash_units == 0
