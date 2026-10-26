@@ -45,3 +45,15 @@ def test_reject_unapproved_vault_without_rpc_use():
             raise AssertionError("Should never call RPC")
     with pytest.raises(ValueError):
         run_fork_test(NoRPC(), "0x" + "b"*40, 10_000_000, usdc_holder="0x" + "a"*40)
+
+
+def test_failed_receipt_reports_step():
+    from lapidus_vaults.fork_roundtrip import ForkRPC
+    class FailedNode:
+        def call(self, method, params):
+            if method == "eth_sendTransaction": return "0xdead"
+            if method == "eth_getTransactionReceipt": return {"status": "0x0", "gasUsed": "0x5208"}
+            if method == "eth_call": raise RuntimeError("revert")
+            raise AssertionError(method)
+    with pytest.raises(RuntimeError, match="deposit USDC into vault: local tx reverted"):
+        ForkRPC.transact(FailedNode(), VAULTS[0], "0x" + "a"*40, "0x6e553f65", step="deposit USDC into vault")
