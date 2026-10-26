@@ -17,8 +17,8 @@ from .wallet_plan import read_policy, read_wallet_snapshot, build_rebalance
 
 # ERC-20 / ERC-4626 standard method selectors.
 ALLOWANCE = "0xdd62ed3e"
-MAX_DEPOSIT = "0x402d267d"
-MAX_WITHDRAW = "0xce96cb77"
+GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000f"
+L1_FEE_UPPER_BOUND = "0xf1c7a58b"  # getL1FeeUpperBound(uint256)
 PREVIEW_DEPOSIT = "0xef8b30f7"
 PREVIEW_WITHDRAW = "0x0a28a477"
 DEPOSIT = "0x6e553f65"
@@ -45,7 +45,7 @@ def _returned_uint(value: str) -> int:
 def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_RESERVE_WEI) -> tuple[Check, ...]:
     """Checks feasibility independently per action at the preview's pinned block.
 
-    A PASS only means individual static checks succeeded at the historical snapshot:
+    A STATIC_PASS_LIMITS_UNVERIFIED only means individual static checks succeeded:
     never equivalent to a complete, sequential rebalance simulation or trade approval.
     """
     snap = preview.snapshot
@@ -85,13 +85,11 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
                 notes.append('Insufficient current wallet USDC (anticipated withdrawals not credited)')
             try:
                 allowance = rpc.call_uint(BASE_USDC, ALLOWANCE, block, _address_word(wallet), _address_word(vault))
-                maximum = rpc.call_uint(vault, MAX_DEPOSIT, block, _address_word(wallet))
                 shares = rpc.call_uint(vault, PREVIEW_DEPOSIT, block, _word(amount))
-                notes.append(f'Allowance: {allowance}; maxDeposit: {maximum}; previewDeposit shares: {shares}')
+                notes.append(f'Allowance: {allowance}; previewDeposit shares: {shares}')
+                notes.append('Morpho V2 maxDeposit is always zero; capacity NOT established by this check')
                 if allowance < amount:
                     notes.append('Insufficient USDC allowance; approval NOT performed')
-                if maximum < amount:
-                    notes.append('maxDeposit below requested amount')
                 if shares == 0:
                     notes.append('previewDeposit returned zero shares')
                 if not any(('Insufficient' in x or 'below' in x or 'zero shares' in x or 'FAILED' in x) for x in notes):
@@ -99,20 +97,19 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
                     _returned_uint(rpc.simulate_call(wallet, vault, data, block))
                     notes.append('Individual deposit eth_call returned successfully')
                     estimate = rpc.estimate_gas(wallet, vault, data)
-                    budget = estimate * gas_price * GAS_MULTIPLIER
-                    notes.append(f'Latest-state gas estimate {estimate}, fee quote {gas_price} wei/gas; 2x budget {budget} wei')
+                    l1_bound = rpc.call_uint(GAS_PRICE_ORACLE, L1_FEE_UPPER_BOUND, block, _word(max(512, len(data[2:]) // 2 + 256)))
+                    budget = (estimate * gas_price + l1_bound) * GAS_MULTIPLIER
+                    notes.append(f'Latest-state gas {estimate}, price {gas_price} wei/gas; pinned L1 bound {l1_bound} wei; 2x combined budget {budget} wei (approximate tx size)')
                     if eth < min_eth_reserve_wei + budget:
                         notes.append('Insufficient ETH for reserved gas budget')
             except (RPCError, ValueError) as exc:
                 notes.append(f'RPC CHECK FAILED: {type(exc).__name__}')
         else:
             try:
-                maximum = rpc.call_uint(vault, MAX_WITHDRAW, block, _address_word(wallet))
                 shares = rpc.call_uint(vault, PREVIEW_WITHDRAW, block, _word(amount))
                 held = next(h.share_balance for h in snap.holdings if h.vault_address == vault)
-                notes.append(f'maxWithdraw: {maximum}; previewWithdraw shares: {shares}; owned shares: {held}')
-                if maximum < amount:
-                    notes.append('maxWithdraw below requested amount (liquidity or limits)')
+                notes.append(f'previewWithdraw shares: {shares}; owned shares: {held}')
+                notes.append('Morpho V2 maxWithdraw is always zero; liquidity NOT established by this check')
                 if shares > held:
                     notes.append('Insufficient vault shares for requested withdrawal')
                 if not any(('below' in x or 'Insufficient' in x or 'FAILED' in x) for x in notes):
@@ -127,7 +124,7 @@ def preflight(preview, rpc: ReadOnlyRPC, *, min_eth_reserve_wei: int = MIN_ETH_R
             except (RPCError, ValueError, StopIteration) as exc:
                 notes.append(f'RPC CHECK FAILED: {type(exc).__name__}')
         blockers = ('below', 'Insufficient', 'FAILED', 'zero shares')
-        status = 'BLOCKED' if any(any(b in line for b in blockers) for line in notes) else 'STATIC_PASS'
+        status = 'BLOCKED' if any(any(b in line for b in blockers) for line in notes) else 'STATIC_PASS_LIMITS_UNVERIFIED'
         results.append(Check(vault, action, amount, status, tuple(notes)))
     return tuple(results)
 
