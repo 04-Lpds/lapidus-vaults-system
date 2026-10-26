@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from urllib.parse import urlparse
 import httpx
 
@@ -74,9 +75,20 @@ class ForkRPC:
 
     def transact(self, contract: str, sender: str, data: str, *, step: str) -> dict:
         txid = self.call("eth_sendTransaction", [{"from": sender, "to": contract, "data": data, "gas": hex(6_000_000)}])
-        receipt = self.call("eth_getTransactionReceipt", [txid])
+        receipt = None
+        # Forked nodes can take time to fetch upstream storage and mine a tx.
+        # Never resubmit the transaction while waiting for the original receipt.
+        for attempt in range(40):
+            receipt = self.call("eth_getTransactionReceipt", [txid])
+            if receipt is not None:
+                break
+            if attempt < 39:
+                time.sleep(0.5)
         if not receipt:
-            raise RuntimeError(f"{step}: receipt unavailable for local tx {txid}")
+            raise RuntimeError(
+                f"{step}: receipt not mined after 20s on local Anvil; "
+                f"tx={txid}. Check Anvil auto-mining, pending tx, and upstream RPC logs."
+            )
         if int(receipt.get("status", "0x0"), 16) != 1:
             gas = receipt.get("gasUsed", "unknown")
             try:
