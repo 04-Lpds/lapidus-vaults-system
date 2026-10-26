@@ -13,7 +13,8 @@ from .allocator import address_ok, display_usdc
 from .client import MorphoClient, MorphoAPIError
 from .rpc_verify import ReadOnlyRPC, RPCError, _address_word
 from .wallet_plan import read_policy, read_wallet_snapshot, build_rebalance
-from .safety_plan import build_safety_plan
+from .safety_plan import build_safety_plan, SafetyPlan, PlanAction
+from .unsigned_candidates import make_unsigned_candidates, candidate_report
 
 ALLOWANCE = "0xdd62ed3e"
 # Conservative *policy assumptions*, not measured execution gas costs.
@@ -78,6 +79,8 @@ def main(argv=None) -> int:
     p.add_argument("--wallet", required=True)
     p.add_argument("--allowlist", required=True)
     p.add_argument("--max-gas-units", type=int, default=DEFAULT_GAS_CAP)
+    p.add_argument("--show-unsigned-candidates", action="store_true", help="Show unverified calldata candidates; no transactions sent")
+    p.add_argument("--max-action-usdc", type=int, default=1000, help="Hard maximum per-intent USDC amount (default 1000)")
     args = p.parse_args(argv)
     if not os.environ.get("BASE_RPC_URL"):
         print("ERROR: BASE_RPC_URL is required", file=sys.stderr)
@@ -86,6 +89,14 @@ def main(argv=None) -> int:
         with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc, MorphoClient() as morpho:
             output = build_live_readonly_plan(args.wallet, args.allowlist, rpc, morpho,
                                                gas_cap=args.max_gas_units)
+        if args.show_unsigned_candidates:
+            from .wallet_plan import read_policy
+            policy = read_policy(args.allowlist)
+            raw = output["plan"]
+            plan = SafetyPlan(**{**raw, "actions": tuple(PlanAction(**{**a, "depends_on": tuple(a["depends_on"])}) for a in raw["actions"]), "assumptions": tuple(raw["assumptions"])})
+            output["unsigned_candidates"] = candidate_report(make_unsigned_candidates(
+                plan, approved_vaults=policy.vault_addresses,
+                max_assets_per_action_units=args.max_action_usdc * 10**6))
         print(json.dumps(output, indent=2))
         print("READ ONLY. NO TRANSACTION SIGNING OR BROADCAST.")
         return 0
