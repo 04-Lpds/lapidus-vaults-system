@@ -73,10 +73,22 @@ def test_policy_validation(tmp_path):
 
 def test_wallet_rpc_reads_pinned_and_rejects_review(monkeypatch):
     from lapidus_vaults import wallet_plan
-    rpc = SimpleNamespace(chain_id=lambda: BASE_CHAIN, block_number=lambda: 123)
+    events = []
+    rpc = SimpleNamespace(chain_id=lambda: BASE_CHAIN,
+                          block_number=lambda: events.append(('rpc_block', 123)) or 123)
+    class Indexed:
+        def v2_config(self, chain, address):
+            events.append(('config', address))
+            return {'address': address}
+        def v2_state(self, chain, address):
+            events.append(('state', address))
+            return {'address': address, 'last_indexed_block': '120'}
+    indexed = Indexed()
     blocks = []
-    def verify(_, __, vault, *, block, wallet):
+    def verify(_, __, vault, *, block, wallet, api_config, api_state):
         blocks.append(block)
+        assert api_config['address'] == vault and api_state['address'] == vault
+        events.append(('verify', vault))
         return SimpleNamespace(status='MATCHED_BASIC_READS', notes=(), chain_id=BASE_CHAIN,
                                rpc_block=block, vault_address=vault, wallet_address=wallet.lower(),
                                wallet_usdc_units=40_000_000, wallet_vault_shares=5,
@@ -84,13 +96,16 @@ def test_wallet_rpc_reads_pinned_and_rejects_review(monkeypatch):
                                api_indexed_block=120, rpc_total_assets=100_000_000,
                                rpc_total_supply=100_000_000)
     monkeypatch.setattr(wallet_plan, 'verify_one', verify)
-    result = read_wallet_snapshot(W, POLICY, rpc, object())
+    result = read_wallet_snapshot(W, POLICY, rpc, indexed)
     assert blocks == [123, 123] and result.in_scope_capital_units == 200_000_000
+    assert [kind for kind, _ in events] == [
+        'config', 'state', 'config', 'state', 'rpc_block', 'verify', 'verify'
+    ]
     def reviewed(*args, **kwargs):
         return SimpleNamespace(status='REVIEW', notes=('indexer lag',))
     monkeypatch.setattr(wallet_plan, 'verify_one', reviewed)
     with pytest.raises(ValueError, match='requires review'):
-        read_wallet_snapshot(W, POLICY, rpc, object())
+        read_wallet_snapshot(W, POLICY, rpc, indexed)
 
 
 def test_save_preview_sqlite(tmp_path):
