@@ -101,7 +101,7 @@ def build_safety_plan(preview: RebalancePreview, *, allowances: Mapping[str, int
 
     if cash != preview.target_idle_units:
         raise ValueError("Planned ending cash does not equal target idle capital")
-    gas_budget = len(actions) * max_gas_units * gas_price_wei + l1_fee_budget_wei
+    gas_budget = (len(actions) * max_gas_units * gas_price_wei + l1_fee_budget_wei) if actions else 0
     if gas_budget > available_eth_wei:
         raise ValueError(f"Insufficient ETH fee ceiling: need {gas_budget} wei, have {available_eth_wei} wei")
 
