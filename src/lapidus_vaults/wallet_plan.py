@@ -82,11 +82,19 @@ def read_wallet_snapshot(wallet: str, policy: Policy, rpc: ReadOnlyRPC, morpho: 
         raise ValueError('Wallet must be a public 20-byte EVM address')
     if rpc.chain_id() != BASE_CHAIN:
         raise RPCError('RPC endpoint is not Base mainnet (8453)')
+    # Fetch indexed API observations for *all* vaults before choosing a block.
+    # Pinning first made subsequent API reads race ahead of the RPC snapshot.
+    indexed = []
+    for address in policy.vault_addresses:
+        config = morpho.v2_config(BASE_CHAIN, address)
+        state = morpho.v2_state(BASE_CHAIN, address)
+        indexed.append((address, config, state))
     block = rpc.block_number()
     holdings: list[VaultHolding] = []
     wallet_usdc: int | None = None
-    for address in policy.vault_addresses:
-        evidence = verify_one(rpc, morpho, address, block=block, wallet=wallet)
+    for address, config, state in indexed:
+        evidence = verify_one(rpc, morpho, address, block=block, wallet=wallet,
+                              api_config=config, api_state=state)
         if evidence.status != 'MATCHED_BASIC_READS':
             raise ValueError(f'RPC/API verification requires review for vault {address}: {"; ".join(evidence.notes)}')
         if (evidence.chain_id != BASE_CHAIN or evidence.rpc_block != block or
