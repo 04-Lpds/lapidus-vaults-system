@@ -75,7 +75,7 @@ class DepositQuotes:
         result={"quote_id":quote_id,"stage":stage,"wallet":wallet.lower(),"vault":vault.lower(),
                 "chain_id":BASE_CHAIN,"observed_block":block,"amount_units":amount_units,
                 "to":destination,"data":data,"value":"0x0","gas":hex(gas_limit),
-                "gas_price_observed_wei":quoted_gas_price,"approval":stage=="approve",
+                "gas_estimate_units":estimated,"gas_price_observed_wei":quoted_gas_price,"approval":stage=="approve",
                 "expires_in_seconds":MAX_QUOTE_AGE_SECONDS,
                 "warning":("Exact-amount USDC approval only." if stage=="approve" else
                            "Deposit simulated individually; vault adapter capacity and exit liquidity not independently verified.")}
@@ -102,9 +102,9 @@ class DepositQuotes:
         if quote["stage"]=="withdraw" and verified["expected_burned_shares"]>quote["max_burned_shares"]:
             self.pending.clear()
             raise ValueError("Withdrawal share preview exceeds reviewed maximum; request a fresh quote")
-        if int(verified["gas"],16)>int(quote["gas"],16):
+        if verified["gas_estimate_units"]>int(quote["gas"],16):
             self.pending.clear()
-            raise ValueError("Gas estimate increased beyond quoted limit; request a fresh quote")
+            raise ValueError("Fresh gas estimate exceeds originally reviewed gas limit; request a fresh quote")
         self.pending.clear()
         if quote["stage"]=="withdraw":
             # Requote validated the latest shares; retain the immutable original cap.
