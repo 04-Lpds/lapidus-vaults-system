@@ -5,6 +5,7 @@ import pytest
 from lapidus_vaults.live_deposit import DepositQuotes, MAX_UNITS
 from lapidus_vaults.fork_roundtrip import ACTOR, VAULTS, BASE_USDC
 from lapidus_vaults.live_deposit_ui import LIVE_DEPOSIT_HTML
+from lapidus_vaults.receipt_events import TRANSFER_TOPIC, ZERO
 
 
 def setup_rpc(allowance=0):
@@ -75,7 +76,11 @@ def test_successful_deposit_receipt_requires_matching_block_deltas():
     rpc.request.side_effect=lambda method, params: (
         {"hash":tx_hash,"from":ACTOR,"to":VAULTS[0],"input":item["data"],
          "value":"0x0","chainId":"0x2105"} if method=="eth_getTransactionByHash" else
-        {"transactionHash":tx_hash,"status":"0x1","blockNumber":"0x65","gasUsed":"0x10000"})
+        {"transactionHash":tx_hash,"status":"0x1","blockNumber":"0x65","gasUsed":"0x10000",
+             "logs":[
+                {"address":BASE_USDC,"topics":[TRANSFER_TOPIC,"0x"+"0"*24+ACTOR[2:],"0x"+"0"*24+VAULTS[0][2:]],"data":"0x"+f"{5000000:064x}"},
+                {"address":VAULTS[0],"topics":[TRANSFER_TOPIC,"0x"+"0"*24+ZERO[2:],"0x"+"0"*24+ACTOR[2:]],"data":"0x"+f"{5000000:064x}"}
+             ]})
     def call_uint(contract,selector,block,*args):
         if selector=="0x70a08231":
             if contract==BASE_USDC:
@@ -84,7 +89,7 @@ def test_successful_deposit_receipt_requires_matching_block_deltas():
         return 5000000
     rpc.call_uint.side_effect=call_uint
     result=q.check_receipt(rpc,item["quote_id"],tx_hash)
-    assert result["status"]=="BLOCK_LEVEL_BALANCE_MATCH"
+    assert result["status"]=="RECEIPT_AND_BLOCK_MATCH"
     assert result["cash_delta_units"]==-5_000_000
     assert result["share_delta"]==5_000_000
     assert not result["financial_reconciliation_complete"]
