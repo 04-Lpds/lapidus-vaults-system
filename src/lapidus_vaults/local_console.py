@@ -147,6 +147,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                             if set(data)!={"quote_id","tx_hash"} or not all(isinstance(v,str) for v in data.values()):
                                 raise ValueError("Unexpected fields")
                             result=quotes.check_receipt(rpc,data["quote_id"],data["tx_hash"])
+                            result["quote_id"]=data["quote_id"]
                             with sqlite3.connect(db_path,timeout=5) as db:
                                 db.execute("""CREATE TABLE IF NOT EXISTS live_deposit_receipt_checks (
                                     id INTEGER PRIMARY KEY AUTOINCREMENT,
