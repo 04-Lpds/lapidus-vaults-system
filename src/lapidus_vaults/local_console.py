@@ -160,8 +160,18 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                                     (datetime.now(timezone.utc).isoformat(),data["tx_hash"],result["status"],
                                     json.dumps(result,sort_keys=True)))
                     return self._send(200,json.dumps(result))
+                except ValueError as exc:
+                    allowed = ("Quote expired", "Quote stale or wrong network",
+                               "Unknown or already-consumed quote", "State changed since quote",
+                               "Insufficient wallet USDC", "Insufficient ETH gas reserve",
+                               "ETH is insufficient", "Existing allowance exceeds",
+                               "Nonzero insufficient approval")
+                    detail = str(exc) if any(str(exc).startswith(x) for x in allowed) else "Preflight rejected request"
+                    return self._send(409,json.dumps({"error":detail,
+                        "submitted_by_backend":False}))
                 except Exception:
-                    return self._send(409,'{"error":"Live deposit validation failed. Check wallet transaction history before retrying."}')
+                    return self._send(503,json.dumps({"error":"Upstream RPC or local journal failure",
+                        "submitted_by_backend":False}))
             if data!={}:
                 return self._send(400,'{"error":"expected empty object"}')
             try:
