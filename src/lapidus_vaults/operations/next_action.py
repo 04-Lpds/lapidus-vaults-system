@@ -27,6 +27,16 @@ def next_campaign_action(db_path: str, *, wallet: str, approved_vaults: tuple[st
         return {"status":"NO_READY_STEP","campaign_id":campaign_id,
                 "steps":campaign["steps"],"execution_enabled":False}
     step=ready[0]
+    with sqlite3.connect(db_path,timeout=5) as db:
+        bindings_table=db.execute("""SELECT name FROM sqlite_master WHERE type='table'
+            AND name='rebalance_campaign_quote_bindings'""").fetchone()
+        bound=(db.execute("""SELECT quote_id FROM rebalance_campaign_quote_bindings
+            WHERE campaign_id=? AND sequence=?""",(campaign_id,step["sequence"])).fetchone()
+            if bindings_table else None)
+    if bound is not None:
+        return {"status":"BOUND_AWAITING_RECEIPT","campaign_id":campaign_id,
+                "sequence":step["sequence"],"execution_enabled":False,
+                "warning":"A transaction was authorized for this campaign step. Verify its on-chain status; do not resubmit."}
     intent=steps[step["sequence"]-1]
     if intent["to_address"].lower()!=intent["to_address"] or intent["chain_id"]!=8453:
         raise ValueError("Invalid saved candidate")
