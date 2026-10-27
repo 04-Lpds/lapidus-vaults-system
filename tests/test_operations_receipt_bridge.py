@@ -48,3 +48,21 @@ def test_wrong_campaign_calldata_cannot_advance(tmp_path):
                    (json.dumps({"to":"0x"+"2"*40,"data":"0xdead","chain_id":8453}),))
     with pytest.raises(ValueError,match="differs"):
         apply_verified_receipt(db,"x",1,"q",valid_receipt())
+
+def test_explicit_binding_advances_only_matching_receipt(tmp_path):
+    from lapidus_vaults.operations.receipt_bridge import (
+        bind_campaign_quote, advance_bound_campaign)
+    db=setup(tmp_path)
+    assert advance_bound_campaign(db,"q",valid_receipt()) is None
+    bind_campaign_quote(db,"x",1,"q")
+    completed=advance_bound_campaign(db,"q",valid_receipt())
+    assert completed["state"]=="COMPLETED"
+    assert advance_bound_campaign(db,"q",valid_receipt())["state"]=="COMPLETED"
+
+def test_invalid_binding_rejected_before_receipt(tmp_path):
+    from lapidus_vaults.operations.receipt_bridge import bind_campaign_quote
+    db=setup(tmp_path)
+    with pytest.raises(ValueError,match="No active campaign"):
+        bind_campaign_quote(db,"x",1,"nonexistent")
+    with pytest.raises(ValueError,match="Invalid campaign step"):
+        bind_campaign_quote(db,"x",2,"q")
