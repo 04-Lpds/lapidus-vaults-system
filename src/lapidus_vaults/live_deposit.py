@@ -106,7 +106,7 @@ class DepositQuotes:
         fields=("stage","to","data","value","gas","wallet","vault",
                 "chain_id","amount_units","observed_block")
         if quote["stage"]=="withdraw":
-            fields+=("max_withdraw_units","expected_burned_shares")
+            fields+=("reported_max_withdraw_units","max_withdraw_is_executable_limit","expected_burned_shares")
         return {k:quote[k] for k in fields}
 
     def check_receipt(self,rpc:ReadOnlyRPC,quote_id:str,tx_hash:str)->dict:
