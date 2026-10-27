@@ -37,3 +37,24 @@ def test_observations_append_without_credentials(tmp_path):
     with sqlite3.connect(file) as db:
         row = db.execute("SELECT rpc_block, status, capital_units FROM monitoring_observations WHERE id=2").fetchone()
     assert row == (1234, "NO_REBALANCE_NEEDED", "0")
+
+
+def test_monitor_lock_prevents_overlapping_runs(tmp_path):
+    import pytest
+    from lapidus_vaults.monitor_once import exclusive_monitor_lock
+    db = str(tmp_path / "monitor.db")
+    with exclusive_monitor_lock(db):
+        with pytest.raises(RuntimeError, match="lock"):
+            with exclusive_monitor_lock(db):
+                pass
+    with exclusive_monitor_lock(db):
+        pass
+
+
+def test_monitor_failure_journal_sanitizes_errors(tmp_path):
+    from lapidus_vaults.monitor_once import save_monitor_failure
+    db_path = str(tmp_path / "monitor.db")
+    assert save_monitor_failure(db_path, wallet=ACTOR, failure_code="RPC_ERROR") == 1
+    with sqlite3.connect(db_path) as db:
+        rows = db.execute("SELECT wallet_address, failure_code FROM monitoring_failures").fetchall()
+    assert rows == [(ACTOR, "RPC_ERROR")]
