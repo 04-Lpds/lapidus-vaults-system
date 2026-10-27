@@ -126,6 +126,23 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                             if set(data)!={"quote_id"} or not isinstance(data["quote_id"],str):
                                 raise ValueError("Unexpected fields")
                             result=quotes.consume(rpc,data["quote_id"])
+                            # Save intended exact transaction before exposing it to MetaMask.
+                            with sqlite3.connect(db_path,timeout=5) as db:
+                                db.execute("""CREATE TABLE IF NOT EXISTS live_deposit_authorizations (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    prepared_at TEXT NOT NULL,
+                                    quote_id TEXT UNIQUE NOT NULL,
+                                    wallet TEXT NOT NULL,
+                                    vault TEXT NOT NULL,
+                                    stage TEXT NOT NULL,
+                                    amount_units INTEGER NOT NULL,
+                                    transaction_json TEXT NOT NULL)""")
+                                db.execute("""INSERT INTO live_deposit_authorizations
+                                    (prepared_at,quote_id,wallet,vault,stage,amount_units,transaction_json)
+                                    VALUES (?,?,?,?,?,?,?)""",
+                                    (datetime.now(timezone.utc).isoformat(),data["quote_id"],
+                                     result["wallet"],result["vault"],result["stage"],
+                                     result["amount_units"],json.dumps(result,sort_keys=True)))
                         else:
                             if set(data)!={"quote_id","tx_hash"} or not all(isinstance(v,str) for v in data.values()):
                                 raise ValueError("Unexpected fields")
