@@ -160,6 +160,8 @@ def main(argv=None) -> int:
     p.add_argument("--drift-bps", type=int, default=500,
                    help="Review if largest individual vault target discrepancy reaches this many bps")
     p.add_argument("--alert-file", default="data/monitor_status.json", help="Local JSON status for external alerting")
+    p.add_argument("--create-campaign", action="store_true", help="Opt-in: journal a non-executable campaign when drift triggers")
+    p.add_argument("--max-action-usdc", type=int, default=10)
     args = p.parse_args(argv)
     try:
         with exclusive_monitor_lock(args.db):
@@ -177,6 +179,18 @@ def main(argv=None) -> int:
                                   "wallet_usdc_units": report["plan"]["wallet_usdc_units"],
                                   "vault_estimated_assets_units": observed_positions,
                                   **assessment}, indent=2))
+                if args.create_campaign and assessment["status"]=="REBALANCE_REVIEW":
+                    if not 1<=args.max_action_usdc<=10:
+                        raise ValueError("Campaign action cap must be 1..10 USDC")
+                    from .live_readonly_plan import build_live_readonly_plan
+                    from .operations.campaign_builder import build_campaign_from_live_plan
+                    with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc, MorphoClient() as morpho:
+                        fresh=build_live_readonly_plan(args.wallet,args.allowlist,rpc,morpho)
+                        campaign=build_campaign_from_live_plan(
+                            args.db,f"observation-{number}",args.wallet,args.allowlist,fresh,rpc,
+                            max_action_units=args.max_action_usdc*1_000_000)
+                    print(json.dumps({"campaign_id":campaign["campaign_id"],"campaign_state":campaign["state"],
+                                      "execution_enabled":False},indent=2))
                 write_alert_status(args.alert_file, {"status": assessment["status"], "rpc_block": report["plan"]["observed_block"], "observation_id": number, "checked_at": datetime.now(timezone.utc).isoformat()})
                 print("READ ONLY: monitoring does not authorize or broadcast transactions.")
                 return 0
