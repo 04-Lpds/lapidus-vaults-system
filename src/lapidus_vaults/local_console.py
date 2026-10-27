@@ -186,6 +186,31 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                                     (checked_at,tx_hash,status,result_json) VALUES (?,?,?,?)""",
                                     (datetime.now(timezone.utc).isoformat(),data["tx_hash"],result["status"],
                                     json.dumps(result,sort_keys=True)))
+                                db.execute("""CREATE TABLE IF NOT EXISTS transaction_lifecycle (
+                                    tx_hash TEXT PRIMARY KEY,
+                                    quote_id TEXT NOT NULL,
+                                    wallet TEXT NOT NULL,
+                                    vault TEXT NOT NULL,
+                                    stage TEXT NOT NULL,
+                                    status TEXT NOT NULL,
+                                    checked_at TEXT NOT NULL,
+                                    actual_fee_wei TEXT,
+                                    result_json TEXT NOT NULL)""")
+                                journaled=engine.consumed[data["quote_id"]]
+                                db.execute("""INSERT INTO transaction_lifecycle
+                                    (tx_hash,quote_id,wallet,vault,stage,status,checked_at,actual_fee_wei,result_json)
+                                    VALUES (?,?,?,?,?,?,?,?,?)
+                                    ON CONFLICT(tx_hash) DO UPDATE SET
+                                      status=excluded.status,
+                                      checked_at=excluded.checked_at,
+                                      actual_fee_wei=excluded.actual_fee_wei,
+                                      result_json=excluded.result_json
+                                    WHERE transaction_lifecycle.quote_id=excluded.quote_id""",
+                                    (data["tx_hash"].lower(),data["quote_id"],journaled["wallet"],
+                                     journaled["vault"],journaled["stage"],result["status"],
+                                     datetime.now(timezone.utc).isoformat(),
+                                     str(result["total_fee_wei"]) if result.get("total_fee_wei") is not None else None,
+                                     json.dumps(result,sort_keys=True)))
                     return self._send(200,json.dumps(result))
                 except ValueError as exc:
                     allowed = ("Quote expired", "Quote stale or wrong network",
