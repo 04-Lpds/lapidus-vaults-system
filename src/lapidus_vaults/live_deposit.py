@@ -9,6 +9,7 @@ import time
 from .allocator import BASE_CHAIN, BASE_USDC, address_ok
 from .rpc_verify import ReadOnlyRPC, RPCError, BALANCE_OF, ASSET, _address_word, _word
 from .unsigned_candidates import APPROVE, DEPOSIT
+from .receipt_events import reconcile_transfer_logs
 
 ALLOWANCE="0xdd62ed3e"
 PREVIEW_DEPOSIT="0xef8b30f7"
@@ -145,7 +146,11 @@ class DepositQuotes:
         else:
             delta_ok=(cash_before-cash_after==q["amount_units"]
                       and shares_after>shares_before)
-        return {"status":"BLOCK_LEVEL_BALANCE_MATCH" if delta_ok else "BLOCK_LEVEL_BALANCE_MISMATCH",
+        if q["stage"]=="withdraw":
+            delta_ok=(cash_after-cash_before==q["amount_units"] and shares_after<shares_before)
+        event_result=reconcile_transfer_logs(receipt,q["wallet"],q["vault"],q["amount_units"],q["stage"])
+        return {"status":"RECEIPT_AND_BLOCK_MATCH" if delta_ok and event_result["matched"] else "RECONCILIATION_MISMATCH",
+                "transaction_event_reconciliation":event_result,
                 "tx_hash":tx_hash,"matched":True,"block":block,
                 "gas_used":int(receipt["gasUsed"],16),"stage":q["stage"],
                 "cash_delta_units":cash_after-cash_before,"share_delta":shares_after-shares_before,
