@@ -71,7 +71,7 @@ def test_withdraw_consume_rejects_changed_share_quote():
     engine=WithdrawalQuotes()
     quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
     rpc=withdrawal_rpc(preview_shares=10**18+1,simulated_shares=10**18+1)
-    with pytest.raises(ValueError,match="State changed"):
+    with pytest.raises(ValueError,match="Withdrawal share preview changed"):
         engine.consume(rpc,quote["quote_id"])
 
 def test_withdraw_consume_exposes_verified_shares():
@@ -81,3 +81,12 @@ def test_withdraw_consume_exposes_verified_shares():
     ready=engine.consume(rpc,quote["quote_id"])
     assert ready["expected_burned_shares"]==quote["expected_burned_shares"]
     assert ready["reported_max_withdraw_units"]==quote["reported_max_withdraw_units"]
+
+def test_withdraw_consume_rejects_gas_increase_with_specific_reason():
+    rpc=withdrawal_rpc()
+    engine=WithdrawalQuotes()
+    quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    rpc.estimate_gas.return_value=300000
+    with pytest.raises(ValueError,match="Gas estimate increased"):
+        engine.consume(rpc,quote["quote_id"])
+
