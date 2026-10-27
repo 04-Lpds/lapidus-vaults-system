@@ -42,6 +42,8 @@ def apply_verified_receipt(db_path: str, campaign_id: str, sequence: int,
     tx=json.loads(serialized)
     if (intended["from_address"]!=wallet or intended["requested_assets_units"]!=amount_units
         or intended["to_address"]!=tx.get("to") or intended["data"]!=tx.get("data")
+        or tx.get("wallet",wallet)!=wallet or tx.get("vault",vault)!=vault
+        or tx.get("amount_units",amount_units)!=amount_units
         or intended["chain_id"]!=tx.get("chain_id")
         or intended["method"]!=stage+"_intent"
         or intended["method"] not in {"approve_intent","deposit_intent","withdraw_intent"}):
