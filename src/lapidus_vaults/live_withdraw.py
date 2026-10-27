@@ -6,6 +6,7 @@ from .rpc_verify import BALANCE_OF, ASSET, _address_word, _word
 from .unsigned_candidates import WITHDRAW
 
 PREVIEW_WITHDRAW="0x0a28a477"
+MAX_WITHDRAW="0xce96cb77"  # ERC-4626 maxWithdraw(address)
 
 class WithdrawalQuotes(DepositQuotes):
     def quote(self,rpc,*,wallet,vault,approved_vaults,amount_units):
@@ -22,13 +23,22 @@ class WithdrawalQuotes(DepositQuotes):
         if eth<MIN_GAS_RESERVE_WEI:
             raise ValueError("Insufficient ETH reserve")
         shares=rpc.call_uint(vault,BALANCE_OF,block,_address_word(wallet))
+        withdrawable=rpc.call_uint(vault,MAX_WITHDRAW,block,_address_word(wallet))
+        if withdrawable<amount_units:
+            raise ValueError("Requested assets exceed maxWithdraw")
         required=rpc.call_uint(vault,PREVIEW_WITHDRAW,block,_word(amount_units))
         if not 0<required<=shares:
             raise ValueError("Insufficient shares or invalid previewWithdraw")
         data=WITHDRAW+_word(amount_units)+_address_word(wallet)+_address_word(wallet)
         out=rpc.simulate_call(wallet,vault,data,block)
-        if not isinstance(out,str) or len(out)!=66 or int(out,16)<=0:
-            raise ValueError("Withdrawal eth_call did not return positive burned shares")
+        if not isinstance(out,str) or len(out)!=66 or not out.startswith("0x"):
+            raise ValueError("Malformed withdrawal eth_call result")
+        try:
+            simulated_shares=int(out,16)
+        except ValueError as exc:
+            raise ValueError("Malformed withdrawal eth_call result") from exc
+        if simulated_shares!=required:
+            raise ValueError("Simulated burned shares differ from previewWithdraw")
         gas_estimate=rpc.estimate_gas(wallet,vault,data)
         if not 21000<=gas_estimate<=700000:
             raise ValueError("Gas estimate outside policy")
@@ -41,6 +51,7 @@ class WithdrawalQuotes(DepositQuotes):
         self.pending.clear()
         obj={"quote_id":quote_id,"stage":"withdraw","wallet":wallet.lower(),"vault":vault.lower(),
              "chain_id":BASE_CHAIN,"observed_block":block,"amount_units":amount_units,
+             "max_withdraw_units":withdrawable,"expected_burned_shares":required,
              "to":vault.lower(),"data":data,"value":"0x0","gas":hex(limit),
              "gas_price_observed_wei":gas_price,"expires_in_seconds":MAX_QUOTE_AGE_SECONDS,
              "warning":"Successful isolated eth_call does not prove future adapter liquidity or exit availability."}
