@@ -93,3 +93,35 @@ def test_successful_deposit_receipt_requires_matching_block_deltas():
     assert result["cash_delta_units"]==-5_000_000
     assert result["share_delta"]==5_000_000
     assert not result["financial_reconciliation_complete"]
+
+def test_receipt_fee_breakdown_requires_both_base_components():
+    from lapidus_vaults.live_deposit import DepositQuotes
+    q=DepositQuotes()
+    wallet=ACTOR.lower()
+    vault=VAULTS[0].lower()
+    quote_id="test-fee"
+    tx_hash="0x"+"34"*32
+    q.consumed[quote_id]={"wallet":wallet,"vault":vault,"to":vault,
+        "data":"0xb460af94"+"00"*96,"amount_units":1_000_000,
+        "stage":"withdraw","observed_block":99}
+    rpc=Mock()
+    rpc.chain_id.return_value=8453
+    tx={"hash":tx_hash,"from":wallet,"to":vault,"input":q.consumed[quote_id]["data"],
+        "value":"0x0","chainId":"0x2105"}
+    receipt={"transactionHash":tx_hash,"status":"0x1","blockNumber":"0x64",
+             "gasUsed":"0x64","effectiveGasPrice":"0x5","l1Fee":"0xa",
+             "logs":[]}
+    rpc.request.side_effect=lambda method,args: tx if method=="eth_getTransactionByHash" else receipt
+    def read_uint(contract,selector,block,*args):
+        if contract==BASE_USDC: return 1_000_000 if block==100 else 0
+        return 100 if block==99 else 99
+    rpc.call_uint.side_effect=read_uint
+    result=q.check_receipt(rpc,quote_id,tx_hash)
+    assert result["execution_fee_wei"]==500
+    assert result["l1_fee_wei"]==10
+    assert result["total_fee_wei"]==510
+    assert result["fee_complete"] is True
+    receipt.pop("l1Fee")
+    result=q.check_receipt(rpc,quote_id,tx_hash)
+    assert result["total_fee_wei"] is None
+    assert result["fee_complete"] is False
