@@ -127,7 +127,25 @@ class DepositQuotes:
         block=int(receipt["blockNumber"],16)
         if block < q["observed_block"]:
             raise ValueError("Transaction predates quoted observation")
-        return {"status":"MINED_MATCHED_NEEDS_BALANCE_RECONCILIATION",
+        # This is a block-to-block observation, not a transaction-scoped proof.
+        if block<1:
+            raise ValueError("Cannot compare genesis balances")
+        def balances(height):
+            return (rpc.call_uint(BASE_USDC,BALANCE_OF,height,_address_word(q["wallet"])),
+                    rpc.call_uint(q["vault"],BALANCE_OF,height,_address_word(q["wallet"])))
+        cash_before,shares_before=balances(block-1)
+        cash_after,shares_after=balances(block)
+        if q["stage"]=="approve":
+            after_allowance=rpc.call_uint(BASE_USDC,ALLOWANCE,block,
+                                         _address_word(q["wallet"]),_address_word(q["vault"]))
+            delta_ok=cash_before==cash_after and shares_before==shares_after and after_allowance>=q["amount_units"]
+        else:
+            delta_ok=(cash_before-cash_after==q["amount_units"]
+                      and shares_after>shares_before)
+        return {"status":"BLOCK_LEVEL_BALANCE_MATCH" if delta_ok else "BLOCK_LEVEL_BALANCE_MISMATCH",
                 "tx_hash":tx_hash,"matched":True,"block":block,
                 "gas_used":int(receipt["gasUsed"],16),"stage":q["stage"],
-                "financial_reconciliation_complete":False}
+                "cash_delta_units":cash_after-cash_before,"share_delta":shares_after-shares_before,
+                "balance_match":delta_ok,
+                "financial_reconciliation_complete":False,
+                "warning":"Block-level deltas may contain unrelated same-block activity; not a transaction-causal proof."}
