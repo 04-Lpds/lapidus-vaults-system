@@ -10,4 +10,4 @@ $Settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhen
 Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Description "Read-only Morpho API/Base RPC monitoring; no signing or funds movement." -Force | Out-Null
 Write-Host "Installed: $TaskName (15-minute interval; task ends after one year unless renewed)"
 Write-Host "Inspect: Get-ScheduledTask -TaskName '$TaskName'"
-Write-Host "Stop: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:\$false"
+Write-Host 'To remove: Unregister-ScheduledTask -TaskName "Lapidus Vault Systems - Read Only Monitor" -Confirm:$false'
