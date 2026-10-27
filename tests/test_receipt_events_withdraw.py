@@ -1,5 +1,7 @@
 """Receipt-scoped token movements and bounded withdrawal quote regression tests."""
 from unittest.mock import Mock
+import pytest
+from lapidus_vaults.live_withdraw import MAX_WITHDRAW, PREVIEW_WITHDRAW
 from lapidus_vaults.receipt_events import reconcile_transfer_logs, TRANSFER_TOPIC, ZERO
 from lapidus_vaults.live_withdraw import WithdrawalQuotes
 from lapidus_vaults.fork_roundtrip import ACTOR, VAULTS, BASE_USDC
@@ -26,17 +28,55 @@ def test_withdraw_receipt():
           transfer(BASE_USDC,VAULTS[0],ACTOR,5000000)]
     assert reconcile_transfer_logs({"logs":logs},ACTOR,VAULTS[0],5000000,"withdraw")["matched"]
 
-def test_withdraw_quote_encoded_and_bounded():
+def withdrawal_rpc(*, max_units=10_000_000, preview_shares=10**18, simulated_shares=10**18):
     rpc=Mock()
     rpc.chain_id.return_value=8453
     rpc.block_number.return_value=123
     rpc.call_address.return_value=BASE_USDC
     rpc.eth_balance.return_value=10**17
-    rpc.call_uint.side_effect=lambda c,s,b,*args: 10**19 if s=="0x70a08231" else 10**18
-    rpc.simulate_call.return_value="0x"+"0"*63+"1"
+    def call_uint(c,s,b,*args):
+        if s=="0x70a08231": return 10**19
+        if s==MAX_WITHDRAW: return max_units
+        if s==PREVIEW_WITHDRAW: return preview_shares
+        raise AssertionError("Unexpected selector: "+s)
+    rpc.call_uint.side_effect=call_uint
+    rpc.simulate_call.return_value="0x"+f"{simulated_shares:064x}"
     rpc.estimate_gas.return_value=200000
     rpc.gas_price_wei.return_value=6000000
+    return rpc
+
+def test_withdraw_quote_encoded_and_bounded():
+    rpc=withdrawal_rpc()
     q=WithdrawalQuotes().quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=5000000)
     assert q["stage"]=="withdraw"
     assert q["data"].startswith("0xb460af94")
     assert q["to"]==VAULTS[0]
+    assert q["max_withdraw_units"]==10_000_000
+    assert q["expected_burned_shares"]==10**18
+
+def test_withdraw_rejects_max_withdraw_shortfall():
+    rpc=withdrawal_rpc(max_units=999_999)
+    with pytest.raises(ValueError,match="maxWithdraw"):
+        WithdrawalQuotes().quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    rpc.simulate_call.assert_not_called()
+
+def test_withdraw_rejects_share_burn_mismatch():
+    rpc=withdrawal_rpc(simulated_shares=10**18+1)
+    with pytest.raises(ValueError,match="differ from previewWithdraw"):
+        WithdrawalQuotes().quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+
+def test_withdraw_consume_rejects_changed_share_quote():
+    rpc=withdrawal_rpc()
+    engine=WithdrawalQuotes()
+    quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    rpc=withdrawal_rpc(preview_shares=10**18+1,simulated_shares=10**18+1)
+    with pytest.raises(ValueError,match="State changed"):
+        engine.consume(rpc,quote["quote_id"])
+
+def test_withdraw_consume_exposes_verified_shares():
+    rpc=withdrawal_rpc()
+    engine=WithdrawalQuotes()
+    quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    ready=engine.consume(rpc,quote["quote_id"])
+    assert ready["expected_burned_shares"]==quote["expected_burned_shares"]
+    assert ready["max_withdraw_units"]==quote["max_withdraw_units"]
