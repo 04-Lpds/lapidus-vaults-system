@@ -94,7 +94,7 @@ class ReadOnlyRPC:
         self.close()
 
     def request(self, method: str, params: list[Any]) -> Any:
-        if method not in {'eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance', 'eth_estimateGas', 'eth_gasPrice'}:
+        if method not in {'eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionReceipt', 'eth_getTransactionByHash'}:
             raise ValueError('Only read-only JSON-RPC methods are permitted')
         self._next_id += 1
         try:
@@ -110,7 +110,10 @@ class ReadOnlyRPC:
             raise RPCError(f'Invalid RPC response envelope for {method}')
         if obj.get('error') is not None:
             raise RPCError(f'{method} returned an RPC error')
-        if not isinstance(obj.get('result'), str):
+        if method in {'eth_getTransactionReceipt', 'eth_getTransactionByHash'}:
+            if obj.get('result') is not None and not isinstance(obj.get('result'), dict):
+                raise RPCError(f'Invalid transaction RPC result from {method}')
+        elif not isinstance(obj.get('result'), str):
             raise RPCError(f'Missing RPC result from {method}')
         return obj['result']
 
