@@ -20,6 +20,7 @@ from .rpc_verify import ReadOnlyRPC
 from .transaction_review import prepare_manifest, store_manifest
 from .wallet_plan import read_policy
 from .live_deposit import DepositQuotes
+from .live_withdraw import WithdrawalQuotes
 from .live_deposit_ui import LIVE_DEPOSIT_HTML
 import sqlite3
 from datetime import datetime, timezone
@@ -74,6 +75,7 @@ document.getElementById('prepare').onclick=async()=>{
 
 def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
     quotes = DepositQuotes()
+    withdrawals = WithdrawalQuotes()
     class Handler(BaseHTTPRequestHandler):
         def _send(self, status, body, content_type="application/json"):
             payload=body.encode("utf-8")
@@ -97,7 +99,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML),"text/html")
 
         def do_POST(self):
-            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check"}:
+            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check"}:
                 return self._send(404,'{"error":"not found"}')
             if self.headers.get("X-LVS-Token")!=token:
                 return self._send(403,'{"error":"invalid local token"}')
@@ -117,15 +119,17 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                 try:
                     vaults=read_policy(allowlist).vault_addresses
                     with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc:
-                        if self.path=="/api/deposit/quote":
+                        if self.path in {"/api/deposit/quote","/api/withdraw/quote"}:
                             if set(data)!={"amount_units"}:
                                 raise ValueError("Unexpected fields")
-                            result=quotes.quote(rpc,wallet=wallet,vault=vaults[0],
+                            engine=withdrawals if self.path=="/api/withdraw/quote" else quotes
+                            result=engine.quote(rpc,wallet=wallet,vault=vaults[0],
                                                 approved_vaults=vaults,amount_units=data["amount_units"])
-                        elif self.path=="/api/deposit/consume":
+                        elif self.path in {"/api/deposit/consume","/api/withdraw/consume"}:
                             if set(data)!={"quote_id"} or not isinstance(data["quote_id"],str):
                                 raise ValueError("Unexpected fields")
-                            result=quotes.consume(rpc,data["quote_id"])
+                            engine=withdrawals if self.path=="/api/withdraw/consume" else quotes
+                            result=engine.consume(rpc,data["quote_id"])
                             # Save intended exact transaction before exposing it to MetaMask.
                             with sqlite3.connect(db_path,timeout=5) as db:
                                 db.execute("""CREATE TABLE IF NOT EXISTS live_deposit_authorizations (
@@ -146,7 +150,8 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                         else:
                             if set(data)!={"quote_id","tx_hash"} or not all(isinstance(v,str) for v in data.values()):
                                 raise ValueError("Unexpected fields")
-                            result=quotes.check_receipt(rpc,data["quote_id"],data["tx_hash"])
+                            engine=withdrawals if self.path=="/api/withdraw/check" else quotes
+                            result=engine.check_receipt(rpc,data["quote_id"],data["tx_hash"])
                             result["quote_id"]=data["quote_id"]
                             with sqlite3.connect(db_path,timeout=5) as db:
                                 db.execute("""CREATE TABLE IF NOT EXISTS live_deposit_receipt_checks (
