@@ -74,7 +74,9 @@ def read_campaign(db_path: str, campaign_id: str) -> dict:
     observations={seq:status for seq,status,_ in records}
     decisions=supervise_candidates(tuple(steps),observations)
     return {"campaign_id":campaign_id,"wallet":wallet,"state":state,
-            "steps":[{**asdict(d),"tx_hash":next((h for seq,_,h in records if seq==d.sequence),None)}
+            "steps":[{**asdict(d),
+                      "status":d.status if state=="ACTIVE" or d.status=="CONFIRMED" else "NOT_ACTIONABLE",
+                      "tx_hash":next((h for seq,_,h in records if seq==d.sequence),None)}
                      for d in decisions]}
 
 def record_receipt_status(db_path: str, campaign_id: str, sequence: int,
@@ -106,8 +108,8 @@ def record_receipt_status(db_path: str, campaign_id: str, sequence: int,
                             (campaign_id,sequence)).fetchone()
         if existing and existing[1]!=tx_hash.lower():
             raise ValueError("Cannot replace the bound transaction hash")
-        if existing and existing[0]=="RECEIPT_AND_BLOCK_MATCH" and status!="RECEIPT_AND_BLOCK_MATCH":
-            raise ValueError("Confirmed receipt cannot regress")
+        if existing and existing[0] in {"RECEIPT_AND_BLOCK_MATCH","REVERTED","RECONCILIATION_MISMATCH","FAILED"} and status!=existing[0]:
+            raise ValueError("Terminal receipt state cannot be rewritten")
         prior={n:st for n,st in db.execute("SELECT sequence,status FROM rebalance_campaign_steps WHERE campaign_id=?",
                                            (campaign_id,)).fetchall()}
         if sequence>1 and any(prior.get(i)!="RECEIPT_AND_BLOCK_MATCH" for i in range(1,sequence)):
