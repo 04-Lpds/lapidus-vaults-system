@@ -22,6 +22,7 @@ from .wallet_plan import read_policy
 from .live_deposit import DepositQuotes
 from .live_withdraw import WithdrawalQuotes
 from .operations.receipt_bridge import advance_bound_campaign
+from .operations.campaigns import read_campaign
 from .live_deposit_ui import LIVE_DEPOSIT_HTML
 from .live_withdraw_ui import LIVE_WITHDRAW_HTML
 import sqlite3
@@ -45,7 +46,7 @@ This interface cannot sign or broadcast transactions. Do not submit the displaye
 <button id="connect">Connect MetaMask (identity only)</button>
 <button id="prepare">Prepare &amp; journal proposal</button>
 </div><p class="warning" id="notice">No unattended on-chain execution is available.</p>
-__LIVE_UI__\n<h2>Latest proposal</h2><pre id="report">No proposal prepared.</pre>
+<h2>Active campaign (review only)</h2><button id="campaignRefresh">Refresh campaign</button><pre id="campaignReport">Not checked</pre>\n__LIVE_UI__\n<h2>Latest proposal</h2><pre id="report">No proposal prepared.</pre>
 <small>All calculations are observations and unsigned intentions, not investment or execution approval.</small>
 <script>
 const settings=__CONFIG__;
@@ -61,6 +62,13 @@ document.getElementById('connect').onclick=async()=>{
   document.getElementById('network').textContent=chain==='0x2105'?'Base (8453)':'Wrong network';
   show(ok&&chain==='0x2105'?'Identity and network match. No signature requested.':'Verify selected wallet and Base network.');
  }catch(e){show('Wallet verification failed: '+e.message)}
+};
+document.getElementById('campaignRefresh').onclick=async()=>{
+ try{
+  const r=await fetch('/api/campaign/status',{method:'POST',headers:{
+   'Content-Type':'application/json','X-LVS-Token':settings.token},body:'{}',credentials:'same-origin'});
+  document.getElementById('campaignReport').textContent=JSON.stringify(await r.json(),null,2);
+ }catch(e){document.getElementById('campaignReport').textContent='Campaign status unavailable'}
 };
 document.getElementById('prepare').onclick=async()=>{
  show('Reading live Base state and creating review-only proposal...');
@@ -101,7 +109,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML + LIVE_WITHDRAW_HTML),"text/html")
 
         def do_POST(self):
-            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check"}:
+            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status"}:
                 return self._send(404,'{"error":"not found"}')
             if self.headers.get("X-LVS-Token")!=token:
                 return self._send(403,'{"error":"invalid local token"}')
@@ -117,6 +125,20 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                     raise ValueError("Expected object")
             except (ValueError,UnicodeDecodeError):
                 return self._send(400,'{"error":"invalid body"}')
+            if self.path=="/api/campaign/status":
+                if data!={}:
+                    return self._send(400,'{"error":"expected empty object"}')
+                try:
+                    with sqlite3.connect(db_path,timeout=5) as db:
+                        exists=db.execute("""SELECT name FROM sqlite_master
+                            WHERE type='table' AND name='rebalance_campaigns'""").fetchone()
+                        row=(db.execute("""SELECT campaign_id FROM rebalance_campaigns
+                            WHERE state='ACTIVE' ORDER BY created_at DESC LIMIT 1""").fetchone()
+                            if exists else None)
+                    response=read_campaign(db_path,row[0]) if row else {"status":"NO_ACTIVE_CAMPAIGN"}
+                    return self._send(200,json.dumps(response))
+                except (sqlite3.Error,ValueError):
+                    return self._send(503,'{"error":"campaign journal unavailable"}')
             if self.path!="/api/prepare":
                 try:
                     vaults=read_policy(allowlist).vault_addresses
