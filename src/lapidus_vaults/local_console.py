@@ -22,6 +22,7 @@ from .wallet_plan import read_policy
 from .live_deposit import DepositQuotes
 from .live_withdraw import WithdrawalQuotes
 from .live_deposit_ui import LIVE_DEPOSIT_HTML
+from .live_withdraw_ui import LIVE_WITHDRAW_HTML
 import sqlite3
 from datetime import datetime, timezone
 
@@ -96,7 +97,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             if not self._host_ok() or urlsplit(self.path).path!="/":
                 return self._send(404,'{"error":"not found"}')
             config=json.dumps({"wallet":wallet,"token":token}).replace("<","\\u003c")
-            self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML),"text/html")
+            self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML + LIVE_WITHDRAW_HTML),"text/html")
 
         def do_POST(self):
             if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check"}:
