@@ -7,6 +7,7 @@ from .unsigned_candidates import WITHDRAW
 
 PREVIEW_WITHDRAW="0x0a28a477"
 MAX_WITHDRAW="0xce96cb77"  # ERC-4626 maxWithdraw(address)
+SHARE_DRIFT_BPS=1  # at most 0.01% more shares than originally reviewed
 
 class WithdrawalQuotes(DepositQuotes):
     def quote(self,rpc,*,wallet,vault,approved_vaults,amount_units):
@@ -54,6 +55,7 @@ class WithdrawalQuotes(DepositQuotes):
              "chain_id":BASE_CHAIN,"observed_block":block,"amount_units":amount_units,
              "reported_max_withdraw_units":withdrawable,"max_withdraw_is_executable_limit":False,
              "expected_burned_shares":required,
+             "max_burned_shares":required+(required*SHARE_DRIFT_BPS+9999)//10000,
              "to":vault.lower(),"data":data,"value":"0x0","gas":hex(limit),
              "gas_price_observed_wei":gas_price,"expires_in_seconds":MAX_QUOTE_AGE_SECONDS,
              "warning":"Morpho V2 maxWithdraw reports zero by design; successful eth_call does not guarantee future liquidity or exit availability."}
