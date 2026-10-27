@@ -96,22 +96,24 @@ class DepositQuotes:
         verified=self.quote(rpc,wallet=quote["wallet"],vault=quote["vault"],
                             approved_vaults=(quote["vault"],),amount_units=quote["amount_units"])
         consistency=("stage","to","data","wallet","value")
-        if quote["stage"]=="withdraw":
-            consistency+=("expected_burned_shares",)
         if any(verified[k]!=quote[k] for k in consistency):
             self.pending.clear()
-            if quote["stage"]=="withdraw" and verified["expected_burned_shares"]!=quote["expected_burned_shares"]:
-                raise ValueError("Withdrawal share preview changed; request and review a fresh quote")
             raise ValueError("Transaction details changed; request and review a fresh quote")
+        if quote["stage"]=="withdraw" and verified["expected_burned_shares"]>quote["max_burned_shares"]:
+            self.pending.clear()
+            raise ValueError("Withdrawal share preview exceeds reviewed maximum; request a fresh quote")
         if int(verified["gas"],16)>int(quote["gas"],16):
             self.pending.clear()
             raise ValueError("Gas estimate increased beyond quoted limit; request a fresh quote")
         self.pending.clear()
+        if quote["stage"]=="withdraw":
+            # Requote validated the latest shares; retain the immutable original cap.
+            quote={**quote,"expected_burned_shares":verified["expected_burned_shares"]}
         self.consumed[quote_id]=quote
         fields=("stage","to","data","value","gas","wallet","vault",
                 "chain_id","amount_units","observed_block")
         if quote["stage"]=="withdraw":
-            fields+=("reported_max_withdraw_units","max_withdraw_is_executable_limit","expected_burned_shares")
+            fields+=("reported_max_withdraw_units","max_withdraw_is_executable_limit","expected_burned_shares","max_burned_shares")
         return {k:quote[k] for k in fields}
 
     def check_receipt(self,rpc:ReadOnlyRPC,quote_id:str,tx_hash:str)->dict:
