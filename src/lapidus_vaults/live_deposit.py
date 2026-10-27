@@ -20,6 +20,7 @@ MAX_BLOCK_AGE=10
 class DepositQuotes:
     def __init__(self):
         self.pending={}
+        self.consumed={}
 
     def quote(self,rpc:ReadOnlyRPC,*,wallet:str,vault:str,approved_vaults:tuple[str,...],
               amount_units:int)->dict:
@@ -94,5 +95,39 @@ class DepositQuotes:
             self.pending.clear()
             raise ValueError("State changed since quote; re-review required")
         self.pending.clear()
+        self.consumed[quote_id]=quote
         return {k:quote[k] for k in ("stage","to","data","value","gas","wallet","vault",
                                      "chain_id","amount_units","observed_block")}
+
+    def check_receipt(self,rpc:ReadOnlyRPC,quote_id:str,tx_hash:str)->dict:
+        """Compare the exact sent calldata, even if receipt is pending."""
+        q=self.consumed.get(quote_id)
+        if q is None or not isinstance(tx_hash,str) or len(tx_hash)!=66:
+            raise ValueError("Unknown consumed quote or invalid transaction hash")
+        bytes.fromhex(tx_hash[2:])
+        if rpc.chain_id()!=BASE_CHAIN:
+            raise ValueError("Wrong chain")
+        tx=rpc.request("eth_getTransactionByHash",[tx_hash])
+        receipt=rpc.request("eth_getTransactionReceipt",[tx_hash])
+        if tx is None:
+            return {"status":"PENDING_NOT_FOUND","tx_hash":tx_hash,"matched":False}
+        if (str(tx.get("hash","")).lower()!=tx_hash.lower()
+            or str(tx.get("from","")).lower()!=q["wallet"]
+            or str(tx.get("to","")).lower()!=q["to"]
+            or str(tx.get("input","")).lower()!=q["data"].lower()
+            or int(tx.get("value","0x0"),16)!=0
+            or int(tx.get("chainId","0x0"),16)!=BASE_CHAIN):
+            raise ValueError("Observed transaction differs from LVS quote")
+        if receipt is None:
+            return {"status":"PENDING_MATCHED_INPUT","tx_hash":tx_hash,"matched":True}
+        if str(receipt.get("transactionHash","")).lower()!=tx_hash.lower():
+            raise ValueError("Receipt hash mismatch")
+        if int(receipt.get("status","0x0"),16)!=1:
+            return {"status":"REVERTED","tx_hash":tx_hash,"matched":True}
+        block=int(receipt["blockNumber"],16)
+        if block < q["observed_block"]:
+            raise ValueError("Transaction predates quoted observation")
+        return {"status":"MINED_MATCHED_NEEDS_BALANCE_RECONCILIATION",
+                "tx_hash":tx_hash,"matched":True,"block":block,
+                "gas_used":int(receipt["gasUsed"],16),"stage":q["stage"],
+                "financial_reconciliation_complete":False}
