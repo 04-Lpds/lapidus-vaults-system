@@ -95,13 +95,19 @@ class DepositQuotes:
         # Require exact same stage, recipient, calldata and gas cap.
         verified=self.quote(rpc,wallet=quote["wallet"],vault=quote["vault"],
                             approved_vaults=(quote["vault"],),amount_units=quote["amount_units"])
-        if any(verified[k]!=quote[k] for k in ("stage","to","data","wallet","value")) or int(verified["gas"],16)>int(quote["gas"],16):
+        consistency=("stage","to","data","wallet","value")
+        if quote["stage"]=="withdraw":
+            consistency+=("expected_burned_shares",)
+        if any(verified[k]!=quote[k] for k in consistency) or int(verified["gas"],16)>int(quote["gas"],16):
             self.pending.clear()
             raise ValueError("State changed since quote; re-review required")
         self.pending.clear()
         self.consumed[quote_id]=quote
-        return {k:quote[k] for k in ("stage","to","data","value","gas","wallet","vault",
-                                     "chain_id","amount_units","observed_block")}
+        fields=("stage","to","data","value","gas","wallet","vault",
+                "chain_id","amount_units","observed_block")
+        if quote["stage"]=="withdraw":
+            fields+=("max_withdraw_units","expected_burned_shares")
+        return {k:quote[k] for k in fields}
 
     def check_receipt(self,rpc:ReadOnlyRPC,quote_id:str,tx_hash:str)->dict:
         """Compare the exact sent calldata, even if receipt is pending."""
