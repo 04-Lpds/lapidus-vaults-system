@@ -40,7 +40,9 @@ class DepositQuotes:
         if eth<MIN_GAS_RESERVE_WEI:
             raise ValueError("Insufficient ETH gas reserve")
         allowance=rpc.call_uint(BASE_USDC,ALLOWANCE,block,_address_word(wallet),_address_word(vault))
-        if allowance>MAX_UNITS:\n            raise ValueError("Existing allowance exceeds the strict single-action safety cap")\n        if allowance<amount_units:
+        if allowance>MAX_UNITS:
+            raise ValueError("Existing allowance exceeds the strict single-action safety cap")
+        if allowance<amount_units:
             if allowance!=0:
                 raise ValueError("Nonzero insufficient approval: manually revoke before proceeding")
             stage="approve"
