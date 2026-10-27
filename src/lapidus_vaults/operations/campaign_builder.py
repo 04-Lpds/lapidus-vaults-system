@@ -21,11 +21,11 @@ def build_campaign_from_live_plan(db_path: str, campaign_id: str, wallet: str,
     raw=live_report.get("plan")
     if not isinstance(raw,dict):
         raise ValueError("Missing safety plan")
-    policy=read_policy(allowlist_path)
     if raw.get("wallet")!=wallet.lower() or raw.get("chain_id")!=8453:
         raise ValueError("Wrong wallet or chain")
     if rpc.chain_id()!=8453 or not 0<=rpc.block_number()-raw["observed_block"]<=max_block_lag:
         raise ValueError("Plan stale or wrong RPC network")
+    policy=read_policy(allowlist_path)
     actions=tuple(PlanAction(**{**step,"depends_on":tuple(step["depends_on"])})
                   for step in raw["actions"])
     if not actions:
