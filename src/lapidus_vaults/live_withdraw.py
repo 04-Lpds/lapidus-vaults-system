@@ -57,7 +57,7 @@ class WithdrawalQuotes(DepositQuotes):
              "expected_burned_shares":required,
              "max_burned_shares":required+(required*SHARE_DRIFT_BPS+9999)//10000,
              "to":vault.lower(),"data":data,"value":"0x0","gas":hex(limit),
-             "gas_price_observed_wei":gas_price,"expires_in_seconds":MAX_QUOTE_AGE_SECONDS,
+             "gas_estimate_units":gas_estimate,"gas_price_observed_wei":gas_price,"expires_in_seconds":MAX_QUOTE_AGE_SECONDS,
              "warning":"Morpho V2 maxWithdraw reports zero by design; successful eth_call does not guarantee future liquidity or exit availability."}
         self.pending[quote_id]=(time.monotonic(),obj)
         return obj
