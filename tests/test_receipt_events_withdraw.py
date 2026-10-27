@@ -28,7 +28,7 @@ def test_withdraw_receipt():
           transfer(BASE_USDC,VAULTS[0],ACTOR,5000000)]
     assert reconcile_transfer_logs({"logs":logs},ACTOR,VAULTS[0],5000000,"withdraw")["matched"]
 
-def withdrawal_rpc(*, max_units=10_000_000, preview_shares=10**18, simulated_shares=10**18):
+def withdrawal_rpc(*, max_units=0, preview_shares=10**18, simulated_shares=10**18):
     rpc=Mock()
     rpc.chain_id.return_value=8453
     rpc.block_number.return_value=123
@@ -51,14 +51,15 @@ def test_withdraw_quote_encoded_and_bounded():
     assert q["stage"]=="withdraw"
     assert q["data"].startswith("0xb460af94")
     assert q["to"]==VAULTS[0]
-    assert q["max_withdraw_units"]==10_000_000
+    assert q["reported_max_withdraw_units"]==0
+    assert q["max_withdraw_is_executable_limit"] is False
     assert q["expected_burned_shares"]==10**18
 
-def test_withdraw_rejects_max_withdraw_shortfall():
-    rpc=withdrawal_rpc(max_units=999_999)
-    with pytest.raises(ValueError,match="maxWithdraw"):
-        WithdrawalQuotes().quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
-    rpc.simulate_call.assert_not_called()
+def test_morpho_v2_zero_max_withdraw_allows_successful_simulation():
+    rpc=withdrawal_rpc(max_units=0)
+    q=WithdrawalQuotes().quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    assert q["reported_max_withdraw_units"]==0
+    rpc.simulate_call.assert_called_once()
 
 def test_withdraw_rejects_share_burn_mismatch():
     rpc=withdrawal_rpc(simulated_shares=10**18+1)
@@ -79,4 +80,4 @@ def test_withdraw_consume_exposes_verified_shares():
     quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
     ready=engine.consume(rpc,quote["quote_id"])
     assert ready["expected_burned_shares"]==quote["expected_burned_shares"]
-    assert ready["max_withdraw_units"]==quote["max_withdraw_units"]
+    assert ready["reported_max_withdraw_units"]==quote["reported_max_withdraw_units"]
