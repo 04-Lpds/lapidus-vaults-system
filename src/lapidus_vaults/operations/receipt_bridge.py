@@ -97,4 +97,8 @@ def advance_bound_campaign(db_path: str, quote_id: str, verified: dict) -> dict 
                           WHERE quote_id=?""",(quote_id,)).fetchone()
     if row is None:
         return None
+    with sqlite3.connect(db_path,timeout=10) as db:
+        state=db.execute("SELECT state FROM rebalance_campaigns WHERE campaign_id=?",(row[0],)).fetchone()
+    if state is not None and state[0]=="COMPLETED":
+        return read_campaign(db_path,row[0])
     return apply_verified_receipt(db_path,row[0],row[1],quote_id,verified)
