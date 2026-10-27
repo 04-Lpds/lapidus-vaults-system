@@ -88,7 +88,7 @@ def test_withdraw_consume_rejects_gas_increase_with_specific_reason():
     engine=WithdrawalQuotes()
     quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
     rpc.estimate_gas.return_value=300000
-    with pytest.raises(ValueError,match="Gas estimate increased"):
+    with pytest.raises(ValueError,match="Fresh gas estimate exceeds"):
         engine.consume(rpc,quote["quote_id"])
 
 
@@ -101,3 +101,21 @@ def test_withdraw_consume_allows_bounded_share_drift_and_returns_fresh_shares():
     ready=engine.consume(rpc,quote["quote_id"])
     assert ready["expected_burned_shares"]==updated
     assert ready["max_burned_shares"]==quote["max_burned_shares"]
+
+def test_withdraw_consume_accepts_fresh_estimate_within_existing_gas_limit():
+    rpc=withdrawal_rpc()
+    engine=WithdrawalQuotes()
+    quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    assert quote["gas_estimate_units"]==200000
+    assert int(quote["gas"],16)==270000
+    rpc.estimate_gas.return_value=220000
+    ready=engine.consume(rpc,quote["quote_id"])
+    assert ready["gas"]==quote["gas"]
+
+def test_withdraw_consume_rejects_fresh_estimate_above_existing_gas_limit():
+    rpc=withdrawal_rpc()
+    engine=WithdrawalQuotes()
+    quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    rpc.estimate_gas.return_value=270001
+    with pytest.raises(ValueError,match="Fresh gas estimate exceeds"):
+        engine.consume(rpc,quote["quote_id"])
