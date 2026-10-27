@@ -152,6 +152,27 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                             if set(data)!={"quote_id","tx_hash"} or not all(isinstance(v,str) for v in data.values()):
                                 raise ValueError("Unexpected fields")
                             engine=withdrawals if self.path=="/api/withdraw/check" else quotes
+                            # Recover a journaled authorization after a server restart.
+                            # Only receipt checking is restored; never a spent quote's send permission.
+                            if data["quote_id"] not in engine.consumed:
+                                with sqlite3.connect(db_path,timeout=5) as db:
+                                    row=db.execute("""SELECT wallet,vault,stage,amount_units,transaction_json
+                                        FROM live_deposit_authorizations WHERE quote_id=?""",
+                                        (data["quote_id"],)).fetchone()
+                                if row is None:
+                                    raise ValueError("Unknown consumed quote or invalid transaction hash")
+                                saved_wallet,saved_vault,saved_stage,saved_amount,raw=row
+                                expected_stage="withdraw" if self.path=="/api/withdraw/check" else None
+                                if (saved_wallet!=wallet.lower() or saved_vault not in vaults
+                                    or (expected_stage and saved_stage!=expected_stage)
+                                    or (not expected_stage and saved_stage not in {"approve","deposit"})):
+                                    raise ValueError("Unknown consumed quote or invalid transaction hash")
+                                tx=json.loads(raw)
+                                if (tx.get("wallet")!=saved_wallet or tx.get("vault")!=saved_vault
+                                    or tx.get("stage")!=saved_stage or tx.get("amount_units")!=saved_amount
+                                    or tx.get("chain_id")!=8453):
+                                    raise ValueError("Invalid journaled authorization")
+                                engine.consumed[data["quote_id"]]=tx
                             result=engine.check_receipt(rpc,data["quote_id"],data["tx_hash"])
                             result["quote_id"]=data["quote_id"]
                             with sqlite3.connect(db_path,timeout=5) as db:
