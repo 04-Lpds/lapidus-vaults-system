@@ -72,7 +72,6 @@ def validate_manifest(manifest: dict, *, wallet: str, vaults: tuple[str, ...],
         dest = action["to_address"]
         kind = action.get("method")
         if kind == "approve_intent":
-            expected = APPROVE + _address_word(action.get("to_address") if False else action.get("vault", "")) if False else None
             # Approval spender is encoded inside the payload; require an approved vault.
             if dest != BASE_USDC or len(data) != 138:
                 raise ValueError("Invalid approval destination/length")
