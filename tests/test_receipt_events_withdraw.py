@@ -54,6 +54,7 @@ def test_withdraw_quote_encoded_and_bounded():
     assert q["reported_max_withdraw_units"]==0
     assert q["max_withdraw_is_executable_limit"] is False
     assert q["expected_burned_shares"]==10**18
+    assert q["max_burned_shares"]==10**18+10**14
 
 def test_morpho_v2_zero_max_withdraw_allows_successful_simulation():
     rpc=withdrawal_rpc(max_units=0)
@@ -70,8 +71,8 @@ def test_withdraw_consume_rejects_changed_share_quote():
     rpc=withdrawal_rpc()
     engine=WithdrawalQuotes()
     quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
-    rpc=withdrawal_rpc(preview_shares=10**18+1,simulated_shares=10**18+1)
-    with pytest.raises(ValueError,match="Withdrawal share preview changed"):
+    rpc=withdrawal_rpc(preview_shares=10**18+10**14+1,simulated_shares=10**18+10**14+1)
+    with pytest.raises(ValueError,match="Withdrawal share preview exceeds reviewed maximum"):
         engine.consume(rpc,quote["quote_id"])
 
 def test_withdraw_consume_exposes_verified_shares():
@@ -90,3 +91,13 @@ def test_withdraw_consume_rejects_gas_increase_with_specific_reason():
     with pytest.raises(ValueError,match="Gas estimate increased"):
         engine.consume(rpc,quote["quote_id"])
 
+
+def test_withdraw_consume_allows_bounded_share_drift_and_returns_fresh_shares():
+    engine=WithdrawalQuotes()
+    rpc=withdrawal_rpc()
+    quote=engine.quote(rpc,wallet=ACTOR,vault=VAULTS[0],approved_vaults=VAULTS,amount_units=1_000_000)
+    updated=10**18+10**13
+    rpc=withdrawal_rpc(preview_shares=updated,simulated_shares=updated)
+    ready=engine.consume(rpc,quote["quote_id"])
+    assert ready["expected_burned_shares"]==updated
+    assert ready["max_burned_shares"]==quote["max_burned_shares"]
