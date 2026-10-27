@@ -17,7 +17,46 @@ import sys
 from .allocator import address_ok
 from .client import MorphoClient, MorphoAPIError
 from .rpc_verify import ReadOnlyRPC, RPCError
-from .live_readonly_plan import build_live_readonly_plan
+from .wallet_plan import read_policy, read_wallet_snapshot, build_rebalance
+
+
+def observation_report(wallet: str, allowlist: str, rpc, morpho) -> dict:
+    """Monitor holdings without requiring ETH for future execution intentions."""
+    policy = read_policy(allowlist)
+    snapshot = read_wallet_snapshot(wallet, policy, rpc, morpho)
+    preview = build_rebalance(snapshot, policy)
+    return {
+        "verification": "Morpho API / pinned Base RPC basic verification passed",
+        "plan": {
+            "chain_id": snapshot.chain_id,
+            "observed_block": snapshot.rpc_block,
+            "capital_units": preview.capital_units,
+            "wallet_usdc_units": snapshot.wallet_usdc_units,
+            "target_idle_units": preview.target_idle_units,
+            "changes": [
+                {"vault_address": c.vault_address, "current_units": c.current_units,
+                 "target_units": c.target_units, "delta_units": c.delta_units}
+                for c in preview.changes
+            ],
+            "actions": [
+                {"kind": "withdraw_intent" if c.delta_units < 0 else "deposit_intent",
+                 "amount_units": abs(c.delta_units), "vault": c.vault_address}
+                for c in preview.changes if c.delta_units != 0
+            ],
+        },
+    }
+
+
+def write_alert_status(path: str, payload: dict) -> None:
+    """Atomic local JSON status artifact for an external notifier to inspect."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.replace(target)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def drift_summary(report: dict, *, threshold_bps: int) -> dict:
@@ -120,6 +159,7 @@ def main(argv=None) -> int:
     p.add_argument("--db", default="data/lapidus.sqlite3")
     p.add_argument("--drift-bps", type=int, default=500,
                    help="Review if largest individual vault target discrepancy reaches this many bps")
+    p.add_argument("--alert-file", default="data/monitor_status.json", help="Local JSON status for external alerting")
     args = p.parse_args(argv)
     try:
         with exclusive_monitor_lock(args.db):
@@ -129,11 +169,12 @@ def main(argv=None) -> int:
                 if not os.environ.get("BASE_RPC_URL"):
                     raise ValueError("BASE_RPC_URL required")
                 with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc, MorphoClient() as morpho:
-                    report = build_live_readonly_plan(args.wallet, args.allowlist, rpc, morpho)
+                    report = observation_report(args.wallet, args.allowlist, rpc, morpho)
                 assessment = drift_summary(report, threshold_bps=args.drift_bps)
                 number = save_observation(args.db, wallet=args.wallet, report=report, assessment=assessment)
                 print(json.dumps({"observation_id": number, "rpc_block": report["plan"]["observed_block"],
                                   **assessment}, indent=2))
+                write_alert_status(args.alert_file, {"status": assessment["status"], "rpc_block": report["plan"]["observed_block"], "observation_id": number, "checked_at": datetime.now(timezone.utc).isoformat()})
                 print("READ ONLY: monitoring does not authorize or broadcast transactions.")
                 return 0
             except (ValueError, OSError, sqlite3.Error, RPCError, MorphoAPIError, RuntimeError) as exc:
@@ -145,6 +186,10 @@ def main(argv=None) -> int:
                     save_monitor_failure(args.db, wallet=args.wallet, failure_code=code)
                 except (OSError, sqlite3.Error):
                     print("MONITOR CHECK FAILED: failure journal unavailable.", file=sys.stderr)
+                try:
+                    write_alert_status(args.alert_file, {"status": "MONITOR_FAILED", "failure_code": code, "checked_at": datetime.now(timezone.utc).isoformat()})
+                except OSError:
+                    print("MONITOR CHECK FAILED: alert-file unavailable.", file=sys.stderr)
                 print(f"MONITOR CHECK FAILED: {code}. No successful observation recorded.", file=sys.stderr)
                 return 1
     except (RuntimeError, OSError) as exc:
