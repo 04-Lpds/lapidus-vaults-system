@@ -58,3 +58,31 @@ def test_monitor_failure_journal_sanitizes_errors(tmp_path):
     with sqlite3.connect(db_path) as db:
         rows = db.execute("SELECT wallet_address, failure_code FROM monitoring_failures").fetchall()
     assert rows == [(ACTOR, "RPC_ERROR")]
+
+
+def test_observation_report_does_not_require_eth_budget():
+    from unittest.mock import Mock, patch
+    from decimal import Decimal
+    from lapidus_vaults.monitor_once import observation_report
+    from lapidus_vaults.wallet_plan import Policy, WalletSnapshot, VaultHolding
+    from lapidus_vaults.fork_roundtrip import VAULTS
+    policy = Policy(VAULTS, Decimal("0.20"), Decimal("0.40"))
+    snapshot = WalletSnapshot(ACTOR, 8453, 1234, 0,
+        tuple(VaultHolding(v, 0, 0, 0, 0, 0) for v in VAULTS), "test", "rpc")
+    with patch("lapidus_vaults.monitor_once.read_policy", return_value=policy), patch(
+        "lapidus_vaults.monitor_once.read_wallet_snapshot", return_value=snapshot
+    ):
+        result = observation_report(ACTOR, "dummy", Mock(), Mock())
+    assert result["plan"]["actions"] == []
+    assert result["plan"]["capital_units"] == 0
+
+
+def test_atomic_monitor_status_file(tmp_path):
+    import json
+    from lapidus_vaults.monitor_once import write_alert_status
+    path = tmp_path / "status.json"
+    write_alert_status(str(path), {"status": "NO_REBALANCE_NEEDED"})
+    assert json.loads(path.read_text())["status"] == "NO_REBALANCE_NEEDED"
+    write_alert_status(str(path), {"status": "MONITOR_FAILED", "failure_code": "RPC_ERROR"})
+    assert json.loads(path.read_text())["failure_code"] == "RPC_ERROR"
+    assert not (tmp_path / "status.json.tmp").exists()
