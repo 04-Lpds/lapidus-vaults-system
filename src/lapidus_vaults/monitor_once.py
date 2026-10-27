@@ -172,7 +172,10 @@ def main(argv=None) -> int:
                     report = observation_report(args.wallet, args.allowlist, rpc, morpho)
                 assessment = drift_summary(report, threshold_bps=args.drift_bps)
                 number = save_observation(args.db, wallet=args.wallet, report=report, assessment=assessment)
+                observed_positions = {c["vault_address"]: c["current_units"] for c in report["plan"]["changes"]}
                 print(json.dumps({"observation_id": number, "rpc_block": report["plan"]["observed_block"],
+                                  "wallet_usdc_units": report["plan"]["wallet_usdc_units"],
+                                  "vault_estimated_assets_units": observed_positions,
                                   **assessment}, indent=2))
                 write_alert_status(args.alert_file, {"status": assessment["status"], "rpc_block": report["plan"]["observed_block"], "observation_id": number, "checked_at": datetime.now(timezone.utc).isoformat()})
                 print("READ ONLY: monitoring does not authorize or broadcast transactions.")
