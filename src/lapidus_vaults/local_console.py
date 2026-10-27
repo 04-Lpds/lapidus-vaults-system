@@ -1,4 +1,4 @@
-"""Local, loopback-only LVS proposal console — no transaction submission.
+"""Local, loopback-only LVS proposal console with manual MetaMask deposit.
 
 Serves a single lightweight browser UI. Wallet connection only requests
 eth_accounts/eth_requestAccounts and eth_chainId; no eth_sendTransaction.
@@ -19,6 +19,10 @@ from .live_readonly_plan import build_live_readonly_plan
 from .rpc_verify import ReadOnlyRPC
 from .transaction_review import prepare_manifest, store_manifest
 from .wallet_plan import read_policy
+from .live_deposit import DepositQuotes
+from .live_deposit_ui import LIVE_DEPOSIT_HTML
+import sqlite3
+from datetime import datetime, timezone
 
 HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -37,8 +41,8 @@ This interface cannot sign or broadcast transactions. Do not submit the displaye
 <div>Base network: <strong id="network">Not checked</strong></div>
 <button id="connect">Connect MetaMask (identity only)</button>
 <button id="prepare">Prepare &amp; journal proposal</button>
-</div><p class="warning" id="notice">No authorization or on-chain execution is available.</p>
-<h2>Latest proposal</h2><pre id="report">No proposal prepared.</pre>
+</div><p class="warning" id="notice">No unattended on-chain execution is available.</p>
+__LIVE_UI__\n<h2>Latest proposal</h2><pre id="report">No proposal prepared.</pre>
 <small>All calculations are observations and unsigned intentions, not investment or execution approval.</small>
 <script>
 const settings=__CONFIG__;
@@ -69,6 +73,7 @@ document.getElementById('prepare').onclick=async()=>{
 
 
 def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
+    quotes = DepositQuotes()
     class Handler(BaseHTTPRequestHandler):
         def _send(self, status, body, content_type="application/json"):
             payload=body.encode("utf-8")
@@ -89,20 +94,58 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             if not self._host_ok() or urlsplit(self.path).path!="/":
                 return self._send(404,'{"error":"not found"}')
             config=json.dumps({"wallet":wallet,"token":token}).replace("<","\\u003c")
-            self._send(200,HTML.replace("__CONFIG__",config),"text/html")
+            self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML),"text/html")
 
         def do_POST(self):
-            if not self._host_ok() or self.path!="/api/prepare":
+            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check"}:
                 return self._send(404,'{"error":"not found"}')
             if self.headers.get("X-LVS-Token")!=token:
                 return self._send(403,'{"error":"invalid local token"}')
             origin=self.headers.get("Origin")
             if origin not in {None,"http://127.0.0.1:8765","http://localhost:8765"}:
                 return self._send(403,'{"error":"invalid origin"}')
-            if self.headers.get("Content-Length")!="2":
-                return self._send(400,'{"error":"expected empty json object"}')
-            if self.rfile.read(2)!=b"{}":
-                return self._send(400,'{"error":"invalid request"}')
+            try:
+                length=int(self.headers.get("Content-Length","-1"))
+                if not 0<=length<=2048:
+                    return self._send(400,'{"error":"invalid length"}')
+                data=json.loads(self.rfile.read(length))
+                if not isinstance(data,dict):
+                    raise ValueError("Expected object")
+            except (ValueError,UnicodeDecodeError):
+                return self._send(400,'{"error":"invalid body"}')
+            if self.path!="/api/prepare":
+                try:
+                    vaults=read_policy(allowlist).vault_addresses
+                    with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc:
+                        if self.path=="/api/deposit/quote":
+                            if set(data)!={"amount_units"}:
+                                raise ValueError("Unexpected fields")
+                            result=quotes.quote(rpc,wallet=wallet,vault=vaults[0],
+                                                approved_vaults=vaults,amount_units=data["amount_units"])
+                        elif self.path=="/api/deposit/consume":
+                            if set(data)!={"quote_id"} or not isinstance(data["quote_id"],str):
+                                raise ValueError("Unexpected fields")
+                            result=quotes.consume(rpc,data["quote_id"])
+                        else:
+                            if set(data)!={"quote_id","tx_hash"} or not all(isinstance(v,str) for v in data.values()):
+                                raise ValueError("Unexpected fields")
+                            result=quotes.check_receipt(rpc,data["quote_id"],data["tx_hash"])
+                            with sqlite3.connect(db_path,timeout=5) as db:
+                                db.execute("""CREATE TABLE IF NOT EXISTS live_deposit_receipt_checks (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    checked_at TEXT NOT NULL,
+                                    tx_hash TEXT NOT NULL,
+                                    status TEXT NOT NULL,
+                                    result_json TEXT NOT NULL)""")
+                                db.execute("""INSERT INTO live_deposit_receipt_checks
+                                    (checked_at,tx_hash,status,result_json) VALUES (?,?,?,?)""",
+                                    (datetime.now(timezone.utc).isoformat(),data["tx_hash"],result["status"],
+                                    json.dumps(result,sort_keys=True)))
+                    return self._send(200,json.dumps(result))
+                except Exception:
+                    return self._send(409,'{"error":"Live deposit validation failed. Check wallet transaction history before retrying."}')
+            if data!={}:
+                return self._send(400,'{"error":"expected empty object"}')
             try:
                 policy=read_policy(allowlist)
                 with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc, MorphoClient() as morpho:
