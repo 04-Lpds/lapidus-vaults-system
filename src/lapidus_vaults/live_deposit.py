@@ -40,7 +40,7 @@ class DepositQuotes:
         if eth<MIN_GAS_RESERVE_WEI:
             raise ValueError("Insufficient ETH gas reserve")
         allowance=rpc.call_uint(BASE_USDC,ALLOWANCE,block,_address_word(wallet),_address_word(vault))
-        if allowance<amount_units:
+        if allowance>MAX_UNITS:\n            raise ValueError("Existing allowance exceeds the strict single-action safety cap")\n        if allowance<amount_units:
             if allowance!=0:
                 raise ValueError("Nonzero insufficient approval: manually revoke before proceeding")
             stage="approve"
@@ -91,7 +91,7 @@ class DepositQuotes:
         # Require exact same stage, recipient, calldata and gas cap.
         verified=self.quote(rpc,wallet=quote["wallet"],vault=quote["vault"],
                             approved_vaults=(quote["vault"],),amount_units=quote["amount_units"])
-        if any(verified[k]!=quote[k] for k in ("stage","to","data","wallet","value")):
+        if any(verified[k]!=quote[k] for k in ("stage","to","data","wallet","value")) or int(verified["gas"],16)>int(quote["gas"],16):
             self.pending.clear()
             raise ValueError("State changed since quote; re-review required")
         self.pending.clear()
