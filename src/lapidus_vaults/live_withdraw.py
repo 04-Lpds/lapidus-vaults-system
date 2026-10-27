@@ -24,8 +24,9 @@ class WithdrawalQuotes(DepositQuotes):
             raise ValueError("Insufficient ETH reserve")
         shares=rpc.call_uint(vault,BALANCE_OF,block,_address_word(wallet))
         withdrawable=rpc.call_uint(vault,MAX_WITHDRAW,block,_address_word(wallet))
-        if withdrawable<amount_units:
-            raise ValueError("Requested assets exceed maxWithdraw")
+        # Morpho Vault V2 maxWithdraw intentionally always returns zero.
+        # Treat it as an observed diagnostic, not an executable liquidity limit.
+        # Require positive owned shares, previewWithdraw, and pinned eth_call instead.
         required=rpc.call_uint(vault,PREVIEW_WITHDRAW,block,_word(amount_units))
         if not 0<required<=shares:
             raise ValueError("Insufficient shares or invalid previewWithdraw")
@@ -51,9 +52,10 @@ class WithdrawalQuotes(DepositQuotes):
         self.pending.clear()
         obj={"quote_id":quote_id,"stage":"withdraw","wallet":wallet.lower(),"vault":vault.lower(),
              "chain_id":BASE_CHAIN,"observed_block":block,"amount_units":amount_units,
-             "max_withdraw_units":withdrawable,"expected_burned_shares":required,
+             "reported_max_withdraw_units":withdrawable,"max_withdraw_is_executable_limit":False,
+             "expected_burned_shares":required,
              "to":vault.lower(),"data":data,"value":"0x0","gas":hex(limit),
              "gas_price_observed_wei":gas_price,"expires_in_seconds":MAX_QUOTE_AGE_SECONDS,
-             "warning":"Successful isolated eth_call does not prove future adapter liquidity or exit availability."}
+             "warning":"Morpho V2 maxWithdraw reports zero by design; successful eth_call does not guarantee future liquidity or exit availability."}
         self.pending[quote_id]=(time.monotonic(),obj)
         return obj
