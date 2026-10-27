@@ -14,7 +14,7 @@ ALLOWANCE="0xdd62ed3e"
 PREVIEW_DEPOSIT="0xef8b30f7"
 MAX_UNITS=10_000_000
 MIN_GAS_RESERVE_WEI=2_000_000_000_000_000
-MAX_QUOTE_AGE_SECONDS=20
+MAX_QUOTE_AGE_SECONDS=90
 MAX_BLOCK_AGE=10
 
 class DepositQuotes:
@@ -76,7 +76,8 @@ class DepositQuotes:
                 "to":destination,"data":data,"value":"0x0","gas":hex(gas_limit),
                 "gas_price_observed_wei":quoted_gas_price,"approval":stage=="approve",
                 "expires_in_seconds":MAX_QUOTE_AGE_SECONDS,
-                "warning":"Wallet approval only; live vault capacity/liquidity and investment safety not proven."}
+                "warning":("Exact-amount USDC approval only." if stage=="approve" else
+                           "Deposit simulated individually; vault adapter capacity and exit liquidity not independently verified.")}
         self.pending[quote_id]=(created,result)
         return result
 
