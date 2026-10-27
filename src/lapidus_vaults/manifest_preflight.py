@@ -55,7 +55,7 @@ def validate_manifest(manifest: dict, *, wallet: str, vaults: tuple[str, ...],
             raise ValueError("Candidate transfers ETH")
         if action.get("to_address") not in set(vaults) | {BASE_USDC}:
             raise ValueError("Unrecognized destination")
-        if not isinstance(action.get("depends_on"), list) or any(type(d) is not int or d >= seq or d < 1 for d in action["depends_on"]):
+        if not isinstance(action.get("depends_on"), (list, tuple)) or any(type(d) is not int or d >= seq or d < 1 for d in action["depends_on"]):
             raise ValueError("Invalid action dependencies")
         data = action.get("data")
         if not isinstance(data, str) or not data.startswith("0x") or len(data) % 2:
