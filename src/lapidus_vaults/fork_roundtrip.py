@@ -56,7 +56,7 @@ class ForkRPC:
     def __exit__(self, *args): self.client.close()
 
     def call(self, method: str, params: list):
-        allowed = {"eth_chainId", "eth_getCode", "eth_call", "eth_getBalance", "eth_getTransactionReceipt", "eth_sendTransaction", "anvil_setBalance", "anvil_setStorageAt", "anvil_impersonateAccount", "anvil_stopImpersonatingAccount"}
+        allowed = {"eth_chainId", "eth_blockNumber", "eth_getCode", "eth_call", "eth_getBalance", "eth_getTransactionReceipt", "eth_sendTransaction", "anvil_setBalance", "anvil_setStorageAt", "anvil_impersonateAccount", "anvil_stopImpersonatingAccount"}
         if method not in allowed:
             raise ValueError("Unsupported local-fork RPC method")
         self.seq += 1
