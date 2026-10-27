@@ -161,11 +161,19 @@ class DepositQuotes:
                       and shares_after>shares_before)
         if q["stage"]=="withdraw":
             delta_ok=(cash_after-cash_before==q["amount_units"] and shares_after<shares_before)
+        gas_used=int(receipt["gasUsed"],16)
+        effective_price=receipt.get("effectiveGasPrice")
+        l1_fee=receipt.get("l1Fee")
+        execution_fee_wei=(gas_used*int(effective_price,16)) if isinstance(effective_price,str) else None
+        l1_fee_wei=int(l1_fee,16) if isinstance(l1_fee,str) else None
+        fee_total_wei=(execution_fee_wei+l1_fee_wei) if execution_fee_wei is not None and l1_fee_wei is not None else None
         event_result=reconcile_transfer_logs(receipt,q["wallet"],q["vault"],q["amount_units"],q["stage"])
         return {"status":"RECEIPT_AND_BLOCK_MATCH" if delta_ok and event_result["matched"] else "RECONCILIATION_MISMATCH",
                 "transaction_event_reconciliation":event_result,
                 "tx_hash":tx_hash,"matched":True,"block":block,
-                "gas_used":int(receipt["gasUsed"],16),"stage":q["stage"],
+                "gas_used":gas_used,"execution_fee_wei":execution_fee_wei,
+                "l1_fee_wei":l1_fee_wei,"total_fee_wei":fee_total_wei,
+                "fee_complete":fee_total_wei is not None,"stage":q["stage"],
                 "cash_delta_units":cash_after-cash_before,"share_delta":shares_after-shares_before,
                 "balance_match":delta_ok,
                 "financial_reconciliation_complete":False,
