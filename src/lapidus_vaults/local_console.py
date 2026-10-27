@@ -25,6 +25,7 @@ from .operations.receipt_bridge import advance_bound_campaign
 from .operations.campaigns import read_campaign
 from .operations.next_action import next_campaign_action
 from .operations.campaign_quote import quote_next_campaign_action
+from .operations.campaign_ui import LIVE_CAMPAIGN_HTML
 from .operations.receipt_bridge import bind_campaign_quote
 from .live_deposit_ui import LIVE_DEPOSIT_HTML
 from .live_withdraw_ui import LIVE_WITHDRAW_HTML
@@ -117,7 +118,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             if not self._host_ok() or urlsplit(self.path).path!="/":
                 return self._send(404,'{"error":"not found"}')
             config=json.dumps({"wallet":wallet,"token":token}).replace("<","\\u003c")
-            self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML + LIVE_WITHDRAW_HTML),"text/html")
+            self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_CAMPAIGN_HTML + LIVE_DEPOSIT_HTML + LIVE_WITHDRAW_HTML),"text/html")
 
         def do_POST(self):
             if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status","/api/campaign/next","/api/campaign/quote","/api/campaign/consume"}:
