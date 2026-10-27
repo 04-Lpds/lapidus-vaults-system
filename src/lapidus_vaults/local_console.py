@@ -168,7 +168,8 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                     return self._send(200,json.dumps(result))
                 except ValueError as exc:
                     allowed = ("Quote expired", "Quote stale or wrong network",
-                               "Unknown or already-consumed quote", "State changed since quote", "Withdrawal share preview changed",\n                               "Transaction details changed", "Gas estimate increased",
+                               "Unknown or already-consumed quote", "State changed since quote", "Withdrawal share preview changed",
+                               "Transaction details changed", "Gas estimate increased",
                                "Insufficient wallet USDC", "Insufficient ETH gas reserve",
                                "ETH is insufficient", "Existing allowance exceeds",
                                "Nonzero insufficient approval",
