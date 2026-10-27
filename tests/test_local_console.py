@@ -89,3 +89,23 @@ def test_withdraw_receipt_check_recovers_journal_after_restart(tmp_path):
             finally:
                 server.shutdown()
                 thread.join()
+
+def test_campaign_status_without_active_campaign_is_read_only(tmp_path):
+    import json
+    handler=make_handler(ACTOR,"dummy",str(tmp_path/"empty.sqlite"),"test-token")
+    with ThreadingHTTPServer(("127.0.0.1",0),handler) as server:
+        worker=threading.Thread(target=server.serve_forever,daemon=True)
+        worker.start()
+        try:
+            conn=HTTPConnection("127.0.0.1",server.server_port)
+            conn.request("POST","/api/campaign/status",body="{}",headers={
+                "Host":"127.0.0.1:8765","Content-Type":"application/json",
+                "X-LVS-Token":"test-token"})
+            response=conn.getresponse()
+            data=json.loads(response.read())
+            assert response.status==200
+            assert data["status"]=="NO_ACTIVE_CAMPAIGN"
+            conn.close()
+        finally:
+            server.shutdown()
+            worker.join()
