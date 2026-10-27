@@ -1,7 +1,7 @@
-"""Local, loopback-only LVS proposal console with manual MetaMask deposit.
+"""Local, loopback-only LVS proposal and supervised MetaMask console.
 
-Serves a single lightweight browser UI. Wallet connection only requests
-eth_accounts/eth_requestAccounts and eth_chainId; no eth_sendTransaction.
+Backend is read-only with respect to blockchain writes. Explicit browser actions
+may request eth_sendTransaction through MetaMask with user approval.
 """
 from __future__ import annotations
 
@@ -42,8 +42,8 @@ border-radius:7px;padding:12px 17px;font-weight:650;cursor:pointer;margin:8px 8p
 pre{background:#1b2836;white-space:pre-wrap;overflow-wrap:anywhere;padding:20px;border-radius:8px}
 small{color:#a9bdcf}.warning{color:#ffe1ac}.status{border:1px solid #415469;padding:16px;border-radius:8px}
 </style></head><body>
-<h1>Lapidus Vault Systems</h1><p>Local proposal console — <strong>READ ONLY</strong>.
-This interface cannot sign or broadcast transactions. Do not submit the displayed calldata.</p>
+<h1>Lapidus Vault Systems</h1><p>Local review console — <strong>manual MetaMask execution available</strong>.
+The backend cannot sign or broadcast. Clicking an authorize button may request a live transaction through MetaMask.</p>
 <div class="status"><div>Expected wallet: <code id="expected"></code></div>
 <div>Wallet status: <strong id="wallet">Not connected</strong></div>
 <div>Base network: <strong id="network">Not checked</strong></div>
@@ -345,8 +345,8 @@ def main(argv=None):
     try:
         server=ThreadingHTTPServer(("127.0.0.1",8765),
              make_handler(args.wallet.lower(),args.allowlist,args.db,token))
-        print("LVS read-only console: http://127.0.0.1:8765/")
-        print("No signing or broadcasting. Ctrl+C to stop.")
+        print("LVS supervised console: http://127.0.0.1:8765/")
+        print("Backend never signs or broadcasts. Browser can request MetaMask approval on explicit click. Ctrl+C to stop.")
         server.serve_forever()
     except KeyboardInterrupt:
         return 0
