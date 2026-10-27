@@ -23,6 +23,7 @@ from .live_deposit import DepositQuotes
 from .live_withdraw import WithdrawalQuotes
 from .operations.receipt_bridge import advance_bound_campaign
 from .operations.campaigns import read_campaign
+from .operations.next_action import next_campaign_action
 from .live_deposit_ui import LIVE_DEPOSIT_HTML
 from .live_withdraw_ui import LIVE_WITHDRAW_HTML
 import sqlite3
@@ -46,7 +47,7 @@ This interface cannot sign or broadcast transactions. Do not submit the displaye
 <button id="connect">Connect MetaMask (identity only)</button>
 <button id="prepare">Prepare &amp; journal proposal</button>
 </div><p class="warning" id="notice">No unattended on-chain execution is available.</p>
-<h2>Active campaign (review only)</h2><button id="campaignRefresh">Refresh campaign</button><pre id="campaignReport">Not checked</pre>\n__LIVE_UI__\n<h2>Latest proposal</h2><pre id="report">No proposal prepared.</pre>
+<h2>Active campaign (review only)</h2><button id="campaignRefresh">Refresh campaign</button><button id="campaignNext">Inspect next planned action</button><pre id="campaignReport">Not checked</pre>\n__LIVE_UI__\n<h2>Latest proposal</h2><pre id="report">No proposal prepared.</pre>
 <small>All calculations are observations and unsigned intentions, not investment or execution approval.</small>
 <script>
 const settings=__CONFIG__;
@@ -62,6 +63,13 @@ document.getElementById('connect').onclick=async()=>{
   document.getElementById('network').textContent=chain==='0x2105'?'Base (8453)':'Wrong network';
   show(ok&&chain==='0x2105'?'Identity and network match. No signature requested.':'Verify selected wallet and Base network.');
  }catch(e){show('Wallet verification failed: '+e.message)}
+};
+document.getElementById('campaignNext').onclick=async()=>{
+ try{
+  const r=await fetch('/api/campaign/next',{method:'POST',headers:{
+   'Content-Type':'application/json','X-LVS-Token':settings.token},body:'{}',credentials:'same-origin'});
+  document.getElementById('campaignReport').textContent=JSON.stringify(await r.json(),null,2);
+ }catch(e){document.getElementById('campaignReport').textContent='Campaign action unavailable'}
 };
 document.getElementById('campaignRefresh').onclick=async()=>{
  try{
@@ -109,7 +117,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML + LIVE_WITHDRAW_HTML),"text/html")
 
         def do_POST(self):
-            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status"}:
+            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status","/api/campaign/next"}:
                 return self._send(404,'{"error":"not found"}')
             if self.headers.get("X-LVS-Token")!=token:
                 return self._send(403,'{"error":"invalid local token"}')
@@ -125,6 +133,15 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                     raise ValueError("Expected object")
             except (ValueError,UnicodeDecodeError):
                 return self._send(400,'{"error":"invalid body"}')
+            if self.path=="/api/campaign/next":
+                if data!={}:
+                    return self._send(400,'{"error":"expected empty object"}')
+                try:
+                    permitted=read_policy(allowlist).vault_addresses
+                    result=next_campaign_action(db_path,wallet=wallet,approved_vaults=permitted)
+                    return self._send(200,json.dumps(result))
+                except (ValueError,sqlite3.Error):
+                    return self._send(409,'{"error":"campaign action requires review"}')
             if self.path=="/api/campaign/status":
                 if data!={}:
                     return self._send(400,'{"error":"expected empty object"}')
