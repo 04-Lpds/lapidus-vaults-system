@@ -171,7 +171,12 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                                "Unknown or already-consumed quote", "State changed since quote",
                                "Insufficient wallet USDC", "Insufficient ETH gas reserve",
                                "ETH is insufficient", "Existing allowance exceeds",
-                               "Nonzero insufficient approval")
+                               "Nonzero insufficient approval",
+                               "Requested assets exceed maxWithdraw",
+                               "Insufficient shares or invalid previewWithdraw",
+                               "Simulated burned shares differ from previewWithdraw",
+                               "Malformed withdrawal eth_call result",
+                               "Withdrawal eth_call did not return positive burned shares")
                     detail = str(exc) if any(str(exc).startswith(x) for x in allowed) else "Preflight rejected request"
                     return self._send(409,json.dumps({"error":detail,
                         "submitted_by_backend":False}))
