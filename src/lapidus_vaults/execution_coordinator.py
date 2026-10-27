@@ -52,6 +52,8 @@ def supervise_candidates(
         if observed is not None and observed not in PENDING | TERMINAL_FAILURES | {CONFIRMED}:
             raise ValueError("Unrecognized receipt state")
         if observed == CONFIRMED:
+            if blocked:
+                raise ValueError("Confirmed later action conflicts with unresolved earlier action")
             status, reason = "CONFIRMED", "Matching receipt and balance reconciliation recorded"
         elif observed in TERMINAL_FAILURES:
             status, reason = "HALT_REPLAN", "Failed or mismatched transaction; refresh entire portfolio"
