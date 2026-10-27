@@ -21,6 +21,7 @@ from .transaction_review import prepare_manifest, store_manifest
 from .wallet_plan import read_policy
 from .live_deposit import DepositQuotes
 from .live_withdraw import WithdrawalQuotes
+from .operations.receipt_bridge import advance_bound_campaign
 from .live_deposit_ui import LIVE_DEPOSIT_HTML
 from .live_withdraw_ui import LIVE_WITHDRAW_HTML
 import sqlite3
@@ -211,6 +212,14 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                                      datetime.now(timezone.utc).isoformat(),
                                      str(result["total_fee_wei"]) if result.get("total_fee_wei") is not None else None,
                                      json.dumps(result,sort_keys=True)))
+                    if self.path in {"/api/deposit/check","/api/withdraw/check"}:
+                        # A bound campaign advances only after the independent RPC receipt
+                        # check and local lifecycle journal have both succeeded.
+                        campaign=advance_bound_campaign(db_path,data["quote_id"],result)
+                        if campaign is not None:
+                            result["campaign"]={"id":campaign["campaign_id"],
+                                                "state":campaign["state"],
+                                                "steps":campaign["steps"]}
                     return self._send(200,json.dumps(result))
                 except ValueError as exc:
                     allowed = ("Quote expired", "Quote stale or wrong network",
