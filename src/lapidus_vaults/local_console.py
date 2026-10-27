@@ -24,6 +24,8 @@ from .live_withdraw import WithdrawalQuotes
 from .operations.receipt_bridge import advance_bound_campaign
 from .operations.campaigns import read_campaign
 from .operations.next_action import next_campaign_action
+from .operations.campaign_quote import quote_next_campaign_action
+from .operations.receipt_bridge import bind_campaign_quote
 from .live_deposit_ui import LIVE_DEPOSIT_HTML
 from .live_withdraw_ui import LIVE_WITHDRAW_HTML
 import sqlite3
@@ -94,6 +96,7 @@ document.getElementById('prepare').onclick=async()=>{
 def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
     quotes = DepositQuotes()
     withdrawals = WithdrawalQuotes()
+    campaign_quotes = {}
     class Handler(BaseHTTPRequestHandler):
         def _send(self, status, body, content_type="application/json"):
             payload=body.encode("utf-8")
@@ -117,7 +120,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_DEPOSIT_HTML + LIVE_WITHDRAW_HTML),"text/html")
 
         def do_POST(self):
-            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status","/api/campaign/next"}:
+            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status","/api/campaign/next","/api/campaign/quote","/api/campaign/consume"}:
                 return self._send(404,'{"error":"not found"}')
             if self.headers.get("X-LVS-Token")!=token:
                 return self._send(403,'{"error":"invalid local token"}')
@@ -160,16 +163,40 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                 try:
                     vaults=read_policy(allowlist).vault_addresses
                     with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc:
-                        if self.path in {"/api/deposit/quote","/api/withdraw/quote"}:
+                        if self.path=="/api/campaign/quote":
+                            if data!={}:
+                                raise ValueError("Unexpected fields")
+                            result=quote_next_campaign_action(
+                                db_path,wallet=wallet,approved_vaults=vaults,rpc=rpc,
+                                deposits=quotes,withdrawals=withdrawals)
+                            campaign_quotes.clear()
+                            campaign_quotes[result["quote_id"]]=(
+                                result["campaign_id"],result["sequence"],result["stage"])
+                        elif self.path in {"/api/deposit/quote","/api/withdraw/quote"}:
                             if set(data)!={"amount_units"}:
                                 raise ValueError("Unexpected fields")
                             engine=withdrawals if self.path=="/api/withdraw/quote" else quotes
                             result=engine.quote(rpc,wallet=wallet,vault=vaults[0],
                                                 approved_vaults=vaults,amount_units=data["amount_units"])
-                        elif self.path in {"/api/deposit/consume","/api/withdraw/consume"}:
+                        elif self.path in {"/api/deposit/consume","/api/withdraw/consume","/api/campaign/consume"}:
                             if set(data)!={"quote_id"} or not isinstance(data["quote_id"],str):
                                 raise ValueError("Unexpected fields")
-                            engine=withdrawals if self.path=="/api/withdraw/consume" else quotes
+                            campaign_meta=campaign_quotes.get(data["quote_id"])
+                            if self.path=="/api/campaign/consume":
+                                if campaign_meta is None:
+                                    raise ValueError("Unknown campaign quote")
+                                campaign_id,sequence,stage=campaign_meta
+                                ready_step=next_campaign_action(
+                                    db_path,wallet=wallet,approved_vaults=vaults)
+                                if (ready_step["status"]!="READY_FOR_MANUAL_PREFLIGHT"
+                                    or ready_step["campaign_id"]!=campaign_id
+                                    or ready_step["sequence"]!=sequence
+                                    or ready_step["method"]!=stage+"_intent"):
+                                    raise ValueError("Campaign changed; replan required")
+                            elif campaign_meta is not None:
+                                raise ValueError("Campaign quote requires campaign authorization")
+                            engine=withdrawals if (self.path=="/api/withdraw/consume"
+                                or (self.path=="/api/campaign/consume" and campaign_meta[2]=="withdraw")) else quotes
                             result=engine.consume(rpc,data["quote_id"])
                             # Save intended exact transaction before exposing it to MetaMask.
                             with sqlite3.connect(db_path,timeout=5) as db:
@@ -188,6 +215,13 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                                     (datetime.now(timezone.utc).isoformat(),data["quote_id"],
                                      result["wallet"],result["vault"],result["stage"],
                                      result["amount_units"],json.dumps(result,sort_keys=True)))
+                            if self.path=="/api/campaign/consume":
+                                try:
+                                    bind_campaign_quote(db_path,campaign_id,sequence,data["quote_id"])
+                                finally:
+                                    campaign_quotes.pop(data["quote_id"],None)
+                                result["campaign_id"]=campaign_id
+                                result["sequence"]=sequence
                         else:
                             if set(data)!={"quote_id","tx_hash"} or not all(isinstance(v,str) for v in data.values()):
                                 raise ValueError("Unexpected fields")
