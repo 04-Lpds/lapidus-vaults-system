@@ -22,15 +22,19 @@ DEFAULT_GAS_CAP = 600_000
 GAS_PRICE_BUFFER_MULTIPLIER = 2
 L1_BUDGET_PER_ACTION = 50_000_000_000_000  # fixed contingency; not a calibrated upper bound
 ETH_RESERVE = 2_000_000_000_000_000
+DEDICATED_EXECUTOR_ETH_RESERVE = 200_000_000_000_000  # 0.0002 ETH; isolated 5-USDC executor
 
 
 def build_live_readonly_plan(wallet: str, allowlist: str, rpc: ReadOnlyRPC,
-                             morpho: MorphoClient, *, gas_cap: int = DEFAULT_GAS_CAP) -> dict:
+                             morpho: MorphoClient, *, gas_cap: int = DEFAULT_GAS_CAP,
+                             eth_reserve_wei: int = ETH_RESERVE) -> dict:
     """Snapshot at verified block; separate latest-state gas quote is labeled."""
     if not address_ok(wallet):
         raise ValueError("Valid public wallet address required")
     if type(gas_cap) is not int or not 21_000 <= gas_cap <= 2_000_000:
         raise ValueError("Gas cap must be in [21000, 2000000] units per step")
+    if type(eth_reserve_wei) is not int or not 0 <= eth_reserve_wei <= ETH_RESERVE:
+        raise ValueError("Invalid explicit ETH reserve")
     policy = read_policy(allowlist)
     snapshot = read_wallet_snapshot(wallet, policy, rpc, morpho)
     preview = build_rebalance(snapshot, policy)
@@ -51,13 +55,13 @@ def build_live_readonly_plan(wallet: str, allowlist: str, rpc: ReadOnlyRPC,
     l1_allowance = len(policy.vault_addresses) * 2 * L1_BUDGET_PER_ACTION
     plan = build_safety_plan(
         preview, allowances=allowances, max_gas_units=gas_cap,
-        gas_price_wei=ceiling, available_eth_wei=max(0, eth_balance - ETH_RESERVE),
+        gas_price_wei=ceiling, available_eth_wei=max(0, eth_balance - eth_reserve_wei),
         l1_fee_budget_wei=l1_allowance)
     return {
         "status": "VERIFIED_READ_ONLY_PLAN_NOT_EXECUTABLE",
         "verification": "Morpho indexed API and Base RPC basic reads passed at snapshot block",
         "eth_balance_wei": eth_balance,
-        "eth_reserved_wei": ETH_RESERVE,
+        "eth_reserved_wei": eth_reserve_wei,
         "latest_gas_price_wei": gas_price,
         "policy_gas_price_ceiling_wei": ceiling,
         "per_action_gas_cap_units": gas_cap,
