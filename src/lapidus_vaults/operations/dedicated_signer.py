@@ -23,7 +23,8 @@ def prepare_signed_transaction(*, consumed: dict, candidate: dict,
                                policy_wallet: str, protected_wallet: str,
                                private_key: str, nonce: int,
                                gas_price_wei: int,
-                               approved_vaults: tuple[str, ...]):
+                               approved_vaults: tuple[str, ...],
+                               max_total_fee_wei: int = MAX_TRANSACTION_FEE_WEI):
     """Validate exact campaign bytes and sign once, without sending."""
     if not isinstance(private_key, str) or not private_key.startswith("0x"):
         raise ValueError("Signing key must be supplied privately at runtime")
@@ -78,8 +79,11 @@ def prepare_signed_transaction(*, consumed: dict, candidate: dict,
         raise ValueError("Gas or nonce outside policy")
     max_fee = gas_price_wei * 2
     priority_fee = min(gas_price_wei, 1_000_000_000)
-    if gas * max_fee > MAX_TRANSACTION_FEE_WEI:
-        raise ValueError("Worst-case transaction ETH fee exceeds cap")
+    if (type(max_total_fee_wei) is not int or
+        not 0 < max_total_fee_wei <= 5_000_000_000_000_000):
+        raise ValueError("Invalid maximum fee policy")
+    if gas * max_fee > max_total_fee_wei:
+        raise ValueError(f"Worst-case ETH fee {gas * max_fee} wei exceeds configured cap {max_total_fee_wei} wei (gas={gas}, maxFeePerGas={max_fee})")
     from eth_utils import to_checksum_address
     unsigned = {
         "chainId": BASE_CHAIN, "type": 2, "nonce": nonce,
