@@ -168,14 +168,15 @@ def main(argv=None) -> int:
                     args.amount_usdc * 10**6, db_path,
                 )
         else:
-            with tempfile.TemporaryDirectory(prefix="lvs-fork-campaign-") as d:
-                db_path = str(Path(d) / "campaign_test.sqlite3")
-                with ForkRPC(args.fork_rpc) as rpc:
-                    result = run_campaign_fork(
-                        rpc, args.wallet, args.source, args.destination,
-                        args.amount_usdc * 10**6, db_path,
-                    )
-                result["sqlite_db"] = "temporary test database (removed on exit)"
+            d = tempfile.mkdtemp(prefix="lvs-fork-campaign-")
+            db_path = str(Path(d) / "campaign_test.sqlite3")
+            with ForkRPC(args.fork_rpc) as rpc:
+                result = run_campaign_fork(
+                    rpc, args.wallet, args.source, args.destination,
+                    args.amount_usdc * 10**6, db_path,
+                )
+            result["sqlite_db"] = db_path
+            result["sqlite_note"] = "Disposable test DB retained for inspection; delete when finished."
         print(json.dumps(result, indent=2))
         print("LOCAL FORK ONLY. NO REAL BASE TRANSACTIONS.")
         return 0
