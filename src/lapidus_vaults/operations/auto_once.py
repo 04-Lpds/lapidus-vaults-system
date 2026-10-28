@@ -94,6 +94,48 @@ def _recover(db_path: str, campaign_id: str, entries: list[dict], rpc: ReadOnlyR
             "resubmitted":False}
 
 
+
+def assert_no_orphaned_authorizations(db_path: str) -> None:
+    """Fail closed on crash windows not represented by a pending submission.
+
+    A persisted binding is an irreversible local authorization boundary: a
+    restart must never generate another quote for that campaign step merely
+    because no signed transaction made it to autonomous_submissions.
+    Likewise, a confirmed journal is not sufficient if the campaign bridge
+    was interrupted before recording the receipt.
+    """
+    with sqlite3.connect(db_path, timeout=10) as db:
+        tables = {row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        if "rebalance_campaign_quote_bindings" not in tables:
+            return
+        if not {"autonomous_submissions", "rebalance_campaign_steps"} <= tables:
+            if db.execute("SELECT 1 FROM rebalance_campaign_quote_bindings LIMIT 1").fetchone():
+                raise RuntimeError("Authorized campaign step has no complete recovery journal; manual halt")
+            return
+        rows = db.execute("""
+            SELECT b.campaign_id,b.sequence,b.quote_id,
+                   j.state,j.quote_id,s.status
+            FROM rebalance_campaign_quote_bindings AS b
+            LEFT JOIN autonomous_submissions AS j
+              ON j.campaign_id=b.campaign_id AND j.sequence=b.sequence
+            LEFT JOIN rebalance_campaign_steps AS s
+              ON s.campaign_id=b.campaign_id AND s.sequence=b.sequence
+        """).fetchall()
+    for campaign_id, sequence, quote_id, journal_state, journal_quote, step_status in rows:
+        if journal_state is None or journal_quote != quote_id:
+            raise RuntimeError(
+                "Orphaned bound quote: authorization exists without a matching "
+                "submission reservation; manual review required, no resubmission"
+            )
+        if journal_state == "CONFIRMED" and step_status != "RECEIPT_AND_BLOCK_MATCH":
+            raise RuntimeError(
+                "Confirmed journal but campaign receipt bridge incomplete; "
+                "manual review required, no resubmission"
+            )
+
+
 def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
                  approved_vaults: tuple[str,...], allowlist_path: str, rpc_url: str,
                  private_key: str, max_capital_units: int) -> dict:
@@ -133,7 +175,7 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
                 recovery=_recover(db_path,existing[0][0],entries,rpc)
                 if recovery is not None:
                     return recovery
-            with MorphoClient() as morpho:
+            # Also cover crashes after authorization/binding but before reserve.\n            assert_no_orphaned_authorizations(db_path)\n            with MorphoClient() as morpho:
                 report=build_live_readonly_plan(wallet, allowlist_path,rpc,morpho)
             observed_units=report["plan"]["capital_units"]
             action=next_auto_action(db_path,policy=policy,
