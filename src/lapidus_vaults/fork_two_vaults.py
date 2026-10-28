@@ -71,7 +71,7 @@ def run_two_vault_fork(rpc: ForkRPC, source: str, destination: str,
     end_cash=rpc.balance(BASE_USDC,ACTOR)
     end_a=rpc.balance(source,ACTOR)
     end_b=rpc.balance(destination,ACTOR)
-    if end_cash!=initial_cash or end_a>shares_a or end_b>rpc.balance(destination,ACTOR)+1:
+    if end_cash!=initial_cash or end_a!=initial_a or end_b!=initial_b:
         raise RuntimeError("Final portfolio reconciliation failed")
     return {"status":"LOCAL_FORK_TWO_VAULT_REHEARSAL_PASSED",
             "source":source,"destination":destination,"amount_units":amount,
