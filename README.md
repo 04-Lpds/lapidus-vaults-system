@@ -1,106 +1,108 @@
 # Lapidus Vault Systems
 
-**Read-only Morpho Vault V2 research system — v0.3-alpha2 exposure + portfolio look-through increment (24 October 2026)**
+**Morpho Vault V2 portfolio monitoring and supervised execution on Base.**
 
-Prototype of a Python/Rust DeFi vault monitoring, risk research and eventual controlled-automation platform. This repository **does not trade, sign transactions, or hold any private keys**. It is deliberately not a production execution system.
+LVS is a Python system for observing vault positions, computing bounded USDC
+allocation plans, journaling transaction intentions, and reconciling supervised
+approvals, deposits and withdrawals against on-chain receipts. It persists
+monitoring observations and execution campaigns to SQLite.
 
-Read `docs/Lapidus_Vault_Systems_Project_Blueprint_v0.2.docx` for the latest blueprint: **autonomous personal-capital allocation across existing Morpho vaults**, not a curator-facing product. For reproduction and code review, start with `docs/VERIFY_WINDOWS.md`, `docs/RUST_WALKTHROUGH.md`, and `docs/AUDIT_SUMMARY.md`.
+**Verified milestone:** on 27 October 2026 a four-step supervised Base
+campaign (`supervised-test-001`) completed with matching receipts for two
+exact-amount approvals and two deposits. The following read-only observation
+(#65) recorded a ~12 USDC portfolio, roughly 40% in each selected vault and
+20% idle, with `NO_REBALANCE_NEEDED`. These are small-scale functional tests,
+not evidence of profitable strategies or comprehensive protocol risk control.
 
-## What actually works now
+## Status and execution boundaries
 
-- Calls Morpho's public listed Vault V2 directory and Vault V2 state endpoint.
-- Preserves token values as base-unit integers; validates response structure and vault identity.
-- Persists append-only state snapshots with raw JSON in SQLite.
-- Prints observed idle and reported withdrawable shares of total assets.
-- Includes 55 passing offline tests in this development increment (mock HTTP, SQLite persistence, screening/plan, and exposures).
-- Contains a separate **read-only Rust/Alloy RPC probe** (source provided; requires Cargo dependencies).
+| Capability | Status |
+| --- | --- |
+| Morpho V2 discovery and read-only snapshots | Implemented |
+| Wallet-aware allocation planning and drift monitoring | Implemented |
+| SQLite monitoring and transaction authorization journal | Implemented |
+| Supervised MetaMask approval, deposit and withdrawal | Live-tested |
+| Persisted multi-step campaign with dependency gating | Live-tested |
+| RPC receipt/event/balance checks and restart recovery | Live-tested |
+| Bounded receipt polling without automatic resubmission | v0.6 development |
+| Autonomous local-fork campaign execution | Available for Anvil testing |
+| **Unattended mainnet signing and broadcast** | **Not implemented / not enabled** |
 
-**Not implemented**: complete recursive adapter look-through, market credit-loss modeling, API-vs-RPC indexer lag reconciliation, permissioned operations, transaction simulation, wallet signing, production logging. A first-level, incomplete market exposure inventory is included; nested vaults are flagged, not silently ignored. The API-reported withdrawable amount is NOT a promise of an executable withdrawal.
+The system is **not an audited vault allocator**. Vault liquidity, adapter
+risk, pricing/oracle behavior, and execution fee economics require independent
+assessment. It never guarantees successful withdrawals or financial outcomes.
 
-## Quick start: Python
+## Installation
 
-**Windows PowerShell users:** prefer the commands in `docs/VERIFY_WINDOWS.md`; the examples below are shell-neutral except for virtual-environment activation.
-
-```bash
-python -m venv .venv
-# activate .venv in your shell
-python -m pip install -e '.[dev]'
-pytest -q
-python -m lapidus_vaults list --chain 8453 --limit 10
-python -m lapidus_vaults collect --chain 8453 --limit 3
-python -m lapidus_vaults report
-python -m lapidus_vaults exposures --vault 0x050cE30b927Da55177A4914EC73480238BAD56f0
-```
-
-To constrain discovery to a specific stablecoin, use `--asset-address 0x...` with the correct token address on the selected chain; verify token contracts independently. The directory covers **listed** V2 vaults only, not all deployed vaults. Do not assume that the first N vaults are liquid, mature, or safe.
-
-The CLI defaults to Base chain ID 8453 only to reduce setup friction; the project has **not** preselected real vaults or verified their security. Data lives under `data/lapidus.sqlite3` and is gitignored. No .env or secret key is necessary for read-only Morpho API collection.
-
-## Quick start: Rust RPC probe
-
-Requires Rust/Cargo and an actual reliable JSON-RPC endpoint:
-
-```bash
-cd rust/chain-worker
-export RPC_URL='https://YOUR_RPC_PROVIDER_URL'
-export EXPECTED_CHAIN_ID=8453
-cargo run
-```
-
-The worker outputs `{"chain_id":8453,"latest_block":...}` after connecting, and refuses an unexpected chain ID. **It cannot sign anything.** The Rust source follows current [Alloy 2.x](https://alloy.rs/) provider examples; it has not been compiled in the document authoring environment because Cargo is unavailable there.
-
-## CLI commands (read-only)
-
-| Command | Function |
-|---|---|
-| `list` | Discover listed Morpho Vault V2s |
-| `collect` | Collect current state and append SQLite snapshot |
-| `report` | Display latest stored state snapshots |
-| `screen` | Mechanical APY/configuration/liquidity pre-screening |
-| `plan` | Hypothetical equal-weight allocations to locally allowlisted vaults; idle reserve |
-| `exposures` | Inspect documented GraphQL adapter and underlying market positions for selected vaults; nested vaults marked unresolved |
-| `portfolio-exposures` | Analyze saved paper allocations across previously recorded vault market positions (offline) |
-
-For supported options use `python -m lapidus_vaults COMMAND --help`.
-
-## Next build tasks
-
-1. Select 3–5 one-chain, same-underlying Morpho V2 vaults after checking available exposure and liquidity data.
-2. Add state/allocations/withdrawal-options API adapters and relational tables for exposures.
-3. Compare API `last_indexed_block` against actual RPC chain head, with a strict stale-data policy.
-4. Build scenario-based concentration and withdrawal-liquidity reports; label model assumptions.
-5. Add structured logs, metrics, backoffs and worker health tests.
-6. Only after dry runs: design a separate wallet-execution threat model and preflight simulator.
-
-## Sources
-
-- [Morpho Vaults API](https://docs.morpho.org/developers/api/morpho-vaults/)
-- [List V2 vaults](https://docs.morpho.org/api/vaults-v2/list-v2-vaults/)
-- [Get V2 vault state](https://docs.morpho.org/api/vaults-v2/get-v2-vault-state/)
-- [Vault V2 roles](https://docs.morpho.org/curate/concepts/roles/)
-- [Alloy Rust EVM tooling](https://alloy.rs/)
-
-
-## v0.2 read-only MVP preview
-
-New: `screen` fetches Morpho V2 configuration, state and historical APY and stores a preliminary screening in SQLite; `plan` generates a hypothetical, capped, equal-weight USDC allocation across explicitly allowlisted vaults, with an idle reserve. This does not trade or measure genuine risk-adjusted yield. See `docs/MVP_PREVIEW_v0.2.md` for setup, limitations and commands.
-
-## v0.3-alpha: exposure inventory
-
-`exposures --vault ADDRESS` queries a Vault V2's current adapters and its direct Morpho Blue market positions using the public Morpho GraphQL API. It stores immutable source observations and indicates where nested adapters or truncated results prevent full risk look-through. **This is not yet a risk score or investment decision.** See `docs/V0.3_EXPOSURES_ALPHA.md` for limitations and workflow.
-
-## v0.3-alpha2: persisted paper portfolio look-through
-
-`plan` now persists its hypothetical USDC allocations in SQLite and prints a paper plan ID.
-If you already have exposure snapshots for every allocated vault, analyze them **offline**:
+Python 3.10+:
 
 ```powershell
-python -m lapidus_vaults portfolio-exposures
-# Or pick an older plan:
-python -m lapidus_vaults portfolio-exposures --plan-id 1 --max-age-hours 48
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-This saves a portfolio analysis with source snapshot IDs; it reports market-level and
-collateral-backed USDC lending concentrations, market HHI (deployed positions only),
-wallet idle and vault-internal idle separately. It is not a trading or credit-risk model.
-See `docs/V0.3_PORTFOLIO_LOOKTHROUGH.md`.
+### Operator CLI
+
+The new unified entry point keeps operator commands separate from internal
+modules. Run `python -m lapidus_vaults.operator --help`, or use `lvs` after
+editable installation.
+
+```powershell
+$env:BASE_RPC_URL = "https://mainnet.base.org"
+.\.venv\Scripts\python.exe -m lapidus_vaults.operator monitor --wallet <PUBLIC_WALLET> --allowlist data/paper_test_allowlist.json
+.\.venv\Scripts\python.exe -m lapidus_vaults.operator console --wallet <PUBLIC_WALLET> --allowlist data/paper_test_allowlist.json
+.\.venv\Scripts\python.exe -m lapidus_vaults.operator campaign-create --wallet <PUBLIC_WALLET> --allowlist data/paper_test_allowlist.json --campaign-id <NEW_ID> --max-action-usdc 1
+```
+
+The console runs on `http://127.0.0.1:8765/` and requires explicit MetaMask
+confirmation **for every live transaction**. Campaigns are not autonomous.
+Do not put private keys, mnemonic phrases, or secret RPC URLs in Git.
+
+### Local autonomous fork rehearsal
+
+With Anvil already running a **Base fork on loopback**:
+
+```powershell
+.\.venv\Scripts\python.exe -m lapidus_vaults.operator auto-fork --fork-rpc http://127.0.0.1:8545 --wallet <PUBLIC_WALLET> --source <ALLOWLISTED_SOURCE> --destination <ALLOWLISTED_DESTINATION> --amount-usdc 1
+```
+
+This executes the three-step local-fork campaign without manual wallet clicks,
+using Anvil impersonation only. It tests production quote/receipt components,
+persistent authorization recovery, and a crash-safe submission reservation
+journal. It **does not sign or broadcast to real Base**.
+
+## Project structure
+
+- `src/lapidus_vaults/allocator.py`, `wallet_plan.py`, `safety_plan.py`:
+  portfolio observation, allocation and bounded planning.
+- `src/lapidus_vaults/rpc_verify.py`, `live_deposit.py`, `live_withdraw.py`:
+  pinned network reads, simulation and preflight.
+- `src/lapidus_vaults/operations/`: campaign persistence, quote binding,
+  receipt reconciliation, autonomous policy/reservation state.
+- `src/lapidus_vaults/monitor_once.py`: periodic read-only monitoring journal.
+- `src/lapidus_vaults/local_console.py`: supervised browser operator interface.
+- `src/lapidus_vaults/testing/`: experimental historical fork scenarios.
+- `tests/`: offline contract mocks, state-machine and regression tests.
+- `rust/chain-worker/`: separate read-only Rust/Alloy RPC experiment.
+- `docs/OPERATOR_AND_ARCHITECTURE.md`: operational details and safety model.
+
+SQLite defaults to `data/lapidus.sqlite3` and must remain untracked. Prior
+v0.3–v0.5 design notes in `docs/` are historical development records rather
+than instructions for the current operator interface.
+
+## Safety and recovery
+
+A quote ID identifies a cryptographically random, locally journaled
+authorization. A transaction hash identifies an on-chain submission.
+After a known submission, **never retry sending solely because the RPC has not
+yet returned a receipt**. The console performs bounded polling and offers
+read-only receipt recovery by quote ID and transaction hash.
+
+The autonomous policy gate rejects live execution and caps prospective actions
+at 1 USDC and dedicated capital at 10 USDC. The reservation journal commits
+`SUBMISSION_UNKNOWN` before a send attempt so a crash cannot trigger a blind
+resubmission. These controls are groundwork, **not an active unattended signer**.
+
+No claim of third-party security audit, custody protection or fully automated
+production allocation is made.
