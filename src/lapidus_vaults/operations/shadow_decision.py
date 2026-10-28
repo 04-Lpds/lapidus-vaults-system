@@ -78,6 +78,7 @@ def main(argv=None):
     p.add_argument("--wallet",required=True)
     p.add_argument("--allowlist",required=True)
     p.add_argument("--db",required=True)
+    p.add_argument("--live-economics",action="store_true",help="Use realized per-vault Morpho APYs and best-effort RPC gas estimates")
     p.add_argument("--eth-usd",required=True,help="Explicit assumed ETH/USD for cost comparison, not a live quote")
     p.add_argument("--incremental-apy",default="0.10",help="Assumed annual incremental yield, decimal (0.10=10%%)")
     p.add_argument("--horizon-days",type=int,default=30)
@@ -93,10 +94,15 @@ def main(argv=None):
         with exclusive_monitor_lock(args.db):
             with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc, MorphoClient() as morpho:
                 report=observation_report(args.wallet,args.allowlist,rpc,morpho)
-                gas_price=rpc.gas_price_wei()
-            result=evaluate(report,gas_price_wei=gas_price,eth_usd=price,
-                            incremental_apy=incremental,horizon_days=args.horizon_days,
-                            threshold_bps=args.drift_bps)
+                if args.live_economics:
+                    from .live_shadow_economics import evaluate_live
+                    result=evaluate_live(report,rpc=rpc,morpho=morpho,eth_usd=price,
+                        horizon_days=args.horizon_days,threshold_bps=args.drift_bps)
+                else:
+                    gas_price=rpc.gas_price_wei()
+                    result=evaluate(report,gas_price_wei=gas_price,eth_usd=price,
+                        incremental_apy=incremental,horizon_days=args.horizon_days,
+                        threshold_bps=args.drift_bps)
             result["shadow_decision_id"]=record(args.db,args.wallet,report,result)
             result["rpc_block"]=report["plan"]["observed_block"]
             print(json.dumps(result,indent=2))
