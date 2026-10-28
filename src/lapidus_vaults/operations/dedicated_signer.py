@@ -20,7 +20,8 @@ MAX_GAS_LIMIT = 700_000
 def prepare_signed_transaction(*, consumed: dict, candidate: dict,
                                policy_wallet: str, protected_wallet: str,
                                private_key: str, nonce: int,
-                               gas_price_wei: int):
+                               gas_price_wei: int,
+                               approved_vaults: tuple[str, ...]):
     """Validate exact campaign bytes and sign once, without sending."""
     if not isinstance(private_key, str) or not private_key.startswith("0x"):
         raise ValueError("Signing key must be supplied privately at runtime")
@@ -53,6 +54,8 @@ def prepare_signed_transaction(*, consumed: dict, candidate: dict,
             raise ValueError("Unexpected vault target")
     else:
         raise ValueError("Unknown execution operation")
+    if vault not in approved_vaults or not all(address_ok(v) for v in approved_vaults):
+        raise ValueError("Vault not permitted by dedicated signer policy")
     if not address_ok(vault) or not address_ok(to):
         raise ValueError("Invalid execution target")
     if consumed.get("value") != "0x0":
@@ -73,8 +76,10 @@ def prepare_signed_transaction(*, consumed: dict, candidate: dict,
         "maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority_fee,
     }
     signed = Account.sign_transaction(unsigned, private_key)
-    return {"raw": "0x" + signed.raw_transaction.hex(),
-            "tx_hash": "0x" + signed.hash.hex(),
+    raw_hex = signed.raw_transaction.hex()
+    hash_hex = signed.hash.hex()
+    return {"raw": raw_hex if raw_hex.startswith("0x") else "0x" + raw_hex,
+            "tx_hash": hash_hex if hash_hex.startswith("0x") else "0x" + hash_hex,
             "signer": signer, "max_fee_wei": gas * max_fee}
 
 
@@ -82,7 +87,8 @@ def reserve_and_broadcast(*, db_path: str, campaign_id: str, sequence: int,
                           quote_id: str, consumed: dict, candidate: dict,
                           policy_wallet: str, protected_wallet: str,
                           private_key: str, rpc_url: str, nonce: int,
-                          gas_price_wei: int) -> dict:
+                          gas_price_wei: int,
+                          approved_vaults: tuple[str, ...]) -> dict:
     """One-shot signed send; never retries an uncertain broadcast.
 
     Caller must obtain a freshly simulated quote and persist the exact
@@ -97,16 +103,19 @@ def reserve_and_broadcast(*, db_path: str, campaign_id: str, sequence: int,
         consumed=consumed, candidate=candidate,
         policy_wallet=policy_wallet, protected_wallet=protected_wallet,
         private_key=private_key, nonce=nonce, gas_price_wei=gas_price_wei,
+        approved_vaults=approved_vaults,
     )
     # Do not trust caller's quote ID or campaign sequence: the journal and
     # campaign candidate must already be bound by trusted orchestration.
     with sqlite3.connect(db_path, timeout=10) as db:
-        saved = db.execute("""SELECT b.campaign_id,b.sequence,a.transaction_json
+        saved = db.execute("""SELECT b.campaign_id,b.sequence,a.transaction_json,c.plan_json,c.state
             FROM rebalance_campaign_quote_bindings b
             JOIN live_deposit_authorizations a ON a.quote_id=b.quote_id
+            JOIN rebalance_campaigns c ON c.campaign_id=b.campaign_id
             WHERE b.quote_id=?""",(quote_id,)).fetchone()
         if (saved is None or saved[0] != campaign_id or saved[1] != sequence
-            or json.loads(saved[2]) != consumed):
+            or saved[4] != "ACTIVE" or json.loads(saved[2]) != consumed
+            or json.loads(saved[3])[sequence-1] != candidate):
             raise ValueError("No exact persisted campaign authorization binding")
     reserve(db_path,campaign_id=campaign_id,sequence=sequence,quote_id=quote_id,
             wallet=policy_wallet,to_address=consumed["to"],
