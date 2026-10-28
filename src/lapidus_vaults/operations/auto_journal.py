@@ -46,13 +46,15 @@ def reserve(db_path: str, *, campaign_id: str, sequence: int, quote_id: str,
         db.execute("BEGIN IMMEDIATE")
         _schema(db)
         exists = db.execute(
-            "SELECT campaign_id,sequence,state FROM autonomous_submissions "
+            "SELECT sequence,state,quote_id FROM autonomous_submissions "
             "WHERE campaign_id=? OR quote_id=?", (campaign_id, quote_id)
         ).fetchall()
-        if exists:
-            # Never quietly turn an unknown or submitted transaction into
-            # a second send. Entire campaign is blocked until resolved.
-            raise ValueError("An autonomous campaign already has a reservation; resolve before retrying")
+        if any(row[2] == quote_id or row[0] == sequence for row in exists):
+            raise ValueError("Duplicate autonomous reservation; never resend")
+        if any(row[1] != "CONFIRMED" for row in exists):
+            raise ValueError("Prior autonomous transaction unresolved; never resend")
+        if exists and (max(row[0] for row in exists) + 1 != sequence):
+            raise ValueError("Autonomous sequence must advance exactly once")
         db.execute("""INSERT INTO autonomous_submissions VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (campaign_id, sequence, quote_id, wallet.lower(), to_address.lower(),
              calldata.lower(), amount_units, "SUBMISSION_UNKNOWN", None, _utc()))
