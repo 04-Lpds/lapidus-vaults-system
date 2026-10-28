@@ -336,7 +336,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                 policy=read_policy(allowlist)
                 with ReadOnlyRPC(os.environ["BASE_RPC_URL"]) as rpc, MorphoClient() as morpho:
                     report=build_live_readonly_plan(wallet,allowlist,rpc,morpho)
-                manifest=prepare_manifest(report,policy.vault_addresses,cap_usdc=100)
+                manifest=prepare_manifest(report,policy.vault_addresses,cap_usdc=10)
                 row_id=store_manifest(db_path,manifest)
                 self._send(200,json.dumps({"manifest_id":row_id,**manifest}))
             except Exception:
