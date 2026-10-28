@@ -29,6 +29,7 @@ def observation_report(wallet: str, allowlist: str, rpc, morpho) -> dict:
         "verification": "Morpho API / pinned Base RPC basic verification passed",
         "plan": {
             "chain_id": snapshot.chain_id,
+            "wallet": snapshot.wallet_address,
             "observed_block": snapshot.rpc_block,
             "capital_units": preview.capital_units,
             "wallet_usdc_units": snapshot.wallet_usdc_units,
