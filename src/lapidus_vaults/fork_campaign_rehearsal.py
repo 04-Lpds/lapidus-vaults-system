@@ -18,8 +18,34 @@ from .fork_roundtrip import (
     addr_word, word,
 )
 from .unsigned_candidates import UnsignedCandidate
-from .operations.campaigns import create_campaign, read_campaign, record_receipt_status
+from .operations.campaigns import create_campaign, read_campaign
+from .operations.campaign_quote import quote_next_campaign_action
+from .operations.receipt_bridge import bind_campaign_quote, advance_bound_campaign
+from .live_deposit import DepositQuotes
+from .live_withdraw import WithdrawalQuotes
+from .rpc_verify import ReadOnlyRPC
 from .operations.next_action import next_campaign_action
+
+
+
+class LocalForkReadAdapter(ReadOnlyRPC):
+    """Expose only read-only production RPC interface over validated ForkRPC.
+
+    The underlying ForkRPC refuses non-loopback endpoints. Mutations still
+    require a separate, explicitly invoked fork-only test call.
+    """
+    def __init__(self, fork):
+        self.fork = fork
+
+    def request(self, method, params):
+        reads = {
+            "eth_chainId", "eth_blockNumber", "eth_getCode", "eth_call",
+            "eth_getBalance", "eth_estimateGas", "eth_gasPrice",
+            "eth_getTransactionReceipt", "eth_getTransactionByHash",
+        }
+        if method not in reads:
+            raise ValueError("Read adapter cannot execute transactions")
+        return self.fork.call(method, params)
 
 
 def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
@@ -71,45 +97,77 @@ def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
     rpc.call("anvil_setBalance", [wallet, hex(10**18)])
     rpc.call("anvil_impersonateAccount", [wallet])
     try:
+        read_rpc = LocalForkReadAdapter(rpc)
+        deposits, withdrawals = DepositQuotes(), WithdrawalQuotes()
         for i, ((method, target), data) in enumerate(zip(operations, calldata), 1):
-            # Reopen database before every action: exercise persisted state.
             projected = next_campaign_action(
                 db_path, wallet=wallet, approved_vaults=VAULTS
             )
             if (projected["status"] != "READY_FOR_MANUAL_PREFLIGHT" or
                     projected["sequence"] != i or projected["method"] != method):
                 raise RuntimeError(f"Campaign did not unlock step {i}")
-            pre_cash = rpc.balance(BASE_USDC, wallet)
-            pre_source = rpc.balance(source, wallet)
-            pre_dest = rpc.balance(destination, wallet)
+
+            # Exact production quote path: pinned checks and eth_call simulation.
+            quoted = quote_next_campaign_action(
+                db_path, wallet=wallet, approved_vaults=VAULTS,
+                rpc=read_rpc, deposits=deposits, withdrawals=withdrawals
+            )
+            if (quoted["sequence"] != i or quoted["data"] != data
+                    or quoted["to"] != target or
+                    quoted["stage"] + "_intent" != method):
+                raise RuntimeError(f"Fresh quote differs from step {i}")
+
+            engine = withdrawals if method == "withdraw_intent" else deposits
+            consumed = engine.consume(read_rpc, quoted["quote_id"])
+            if consumed["data"] != data or consumed["to"] != target:
+                raise RuntimeError("Consumed quote changed campaign calldata")
+
+            # Mirror the console's actual authorization schema and binding.
+            # The transaction is then submitted only through ForkRPC (loopback).
+            from datetime import datetime, timezone
+            with sqlite3.connect(db_path) as db:
+                db.execute("""CREATE TABLE IF NOT EXISTS live_deposit_authorizations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prepared_at TEXT NOT NULL,
+                    quote_id TEXT UNIQUE NOT NULL,
+                    wallet TEXT NOT NULL,
+                    vault TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    amount_units INTEGER NOT NULL,
+                    transaction_json TEXT NOT NULL)""")
+                db.execute("""INSERT INTO live_deposit_authorizations
+                    (prepared_at,quote_id,wallet,vault,stage,amount_units,transaction_json)
+                    VALUES (?,?,?,?,?,?,?)""", (
+                        datetime.now(timezone.utc).isoformat(), quoted["quote_id"],
+                        consumed["wallet"], consumed["vault"], consumed["stage"],
+                        consumed["amount_units"], json.dumps(consumed, sort_keys=True)
+                    ))
+            bind_campaign_quote(db_path, campaign_id, i, quoted["quote_id"])
+
             receipt = rpc.transact(target, wallet, data, step=f"campaign {method}")
             tx_hash = receipt["transactionHash"]
-            post_cash = rpc.balance(BASE_USDC, wallet)
-            post_source = rpc.balance(source, wallet)
-            post_dest = rpc.balance(destination, wallet)
-            # A successful receipt alone is not sufficient: check expected
-            # balance movements for this exact candidate.
-            if i == 1:
-                valid = (post_cash - pre_cash == amount and
-                         post_source < pre_source and post_dest == pre_dest)
-            elif i == 2:
-                allowance = rpc.uint(
-                    BASE_USDC, "0xdd62ed3e" + addr_word(wallet) +
-                    addr_word(destination)
-                )
-                valid = (post_cash == pre_cash and post_source == pre_source
-                         and post_dest == pre_dest and allowance >= amount)
-            else:
-                valid = (pre_cash - post_cash == amount and
-                         post_dest > pre_dest and post_source == pre_source)
-            if not valid:
-                raise RuntimeError(f"Campaign step {i} balance/allowance mismatch")
-            # This test-only bridge checks receipt success and explicit balance
-            # movements; it does NOT claim production receipt_bridge coverage.
-            record_receipt_status(
-                db_path, campaign_id, i, "RECEIPT_AND_BLOCK_MATCH", tx_hash
-            )
-            receipts.append({"sequence": i, "method": method, "tx_hash": tx_hash})
+
+            # Simulate application restart: in-memory consumed quotes are gone.
+            # Recover the exact original authorization from SQLite.
+            fresh_engine = WithdrawalQuotes() if method == "withdraw_intent" else DepositQuotes()
+            with sqlite3.connect(db_path) as db:
+                row = db.execute(
+                    "SELECT transaction_json FROM live_deposit_authorizations WHERE quote_id=?",
+                    (quoted["quote_id"],)
+                ).fetchone()
+            if row is None:
+                raise RuntimeError("Cannot recover original journaled authorization")
+            fresh_engine.consumed[quoted["quote_id"]] = json.loads(row[0])
+            verified = fresh_engine.check_receipt(read_rpc, quoted["quote_id"], tx_hash)
+            if verified["status"] != "RECEIPT_AND_BLOCK_MATCH":
+                raise RuntimeError(f"Production receipt checker rejected step {i}: {verified['status']}")
+            state = advance_bound_campaign(db_path, quoted["quote_id"], verified)
+            if state is None:
+                raise RuntimeError("Production bound receipt bridge did not advance")
+            receipts.append({
+                "sequence": i, "method": method, "tx_hash": tx_hash,
+                "receipt_status": verified["status"], "recovered_from_sqlite": True
+            })
     finally:
         rpc.call("anvil_stopImpersonatingAccount", [wallet])
 
@@ -133,7 +191,7 @@ def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
         raise RuntimeError("Campaign completion or persistent final portfolio mismatch")
 
     return {
-        "status": "FORK_CAMPAIGN_STATE_AND_SQLITE_PASSED",
+        "status": "FORK_CAMPAIGN_RECEIPT_BRIDGE_PASSED",
         "campaign_id": campaign_id, "campaign_state": completed["state"],
         "sqlite_db": db_path, "sqlite_campaign_rows": campaign_rows,
         "sqlite_step_rows": step_rows, "actor": wallet,
@@ -141,8 +199,8 @@ def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
         "source_shares_initial": initial_source, "source_shares_final": final_source,
         "destination_shares_initial": initial_dest,
         "destination_shares_final": final_dest, "receipts": receipts,
-        "scope": "Fork transactions + campaigns/next_action SQLite persistence",
-        "not_tested": "Live quote journal/receipt_bridge, restart recovery UI, autonomous execution",
+        "scope": "Production quote/consume, persisted authorization recovery, production receipt checker and receipt_bridge on local fork",
+        "not_tested": "Browser MetaMask UI, real Base transaction submission, autonomous execution",
     }
 
 
