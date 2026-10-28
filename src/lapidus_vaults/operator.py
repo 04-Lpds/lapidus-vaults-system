@@ -17,6 +17,7 @@ def main(argv=None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("monitor", "Collect and persist a read-only live portfolio observation"),
+        ("shadow-decision", "Record read-only allocation drift and fee-vs-yield decision"),
         ("console", "Start the local supervised MetaMask console"),
         ("campaign-create", "Persist a read-only supervised rebalance campaign"),
         ("fork-rehearsal", "Run local Anvil campaign and receipt-bridge integration"),
@@ -31,11 +32,12 @@ def main(argv=None) -> int:
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign
+    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision
     from .testing import signed_fork_rehearsal, auto_lifecycle_fork
 
     runners = {
         "monitor": monitor_once.main,
+        "shadow-decision": shadow_decision.main,
         "console": local_console.main,
         "campaign-create": create_campaign.main,
         "fork-rehearsal": fork_campaign_rehearsal.main,
