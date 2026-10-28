@@ -136,7 +136,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str) -> dict:
                      lambda _: _read_adapter(rpc)),
         patch.object(auto_once, "MorphoClient", _UnusedClient),
         patch.object(auto_once, "build_live_readonly_plan",
-                     lambda *a: {"plan": {"capital_units": amount}}),
+                     lambda *a, **kw: {"plan": {"capital_units": amount}}),
         patch.object(auto_once, "read_nonce", nonce),
         patch.object(auto_once, "reserve_and_broadcast", fork_broadcast),
     ]
