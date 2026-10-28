@@ -22,11 +22,13 @@ def main(argv=None) -> int:
         ("fork-rehearsal", "Run local Anvil campaign and receipt-bridge integration"),
         ("auto-fork", "Run an unattended campaign ONLY on a local Anvil Base fork"),
         ("auto-once", "Experimental dedicated-wallet live executor; disabled unless explicitly enabled"),
+        ("signed-fork", "EIP-1559 signer test with disposable key on local Anvil"),
     ):
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
     from .operations import create_campaign, auto_once
+    from .testing import signed_fork_rehearsal
 
     runners = {
         "monitor": monitor_once.main,
@@ -35,6 +37,7 @@ def main(argv=None) -> int:
         "fork-rehearsal": fork_campaign_rehearsal.main,
         "auto-fork": fork_campaign_rehearsal.main,
         "auto-once": auto_once.main,
+        "signed-fork": signed_fork_rehearsal.main,
     }
     return int(runners[args.command](rest))
 
