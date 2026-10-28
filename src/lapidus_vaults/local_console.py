@@ -121,7 +121,7 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
             self._send(200,HTML.replace("__CONFIG__",config).replace("__LIVE_UI__",LIVE_CAMPAIGN_HTML + LIVE_DEPOSIT_HTML + LIVE_WITHDRAW_HTML),"text/html")
 
         def do_POST(self):
-            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status","/api/campaign/next","/api/campaign/quote","/api/campaign/consume"}:
+            if not self._host_ok() or self.path not in {"/api/prepare","/api/deposit/quote","/api/deposit/consume","/api/deposit/check","/api/withdraw/quote","/api/withdraw/consume","/api/withdraw/check","/api/campaign/status","/api/campaign/next","/api/campaign/quote","/api/campaign/consume","/api/campaign/recovery-info"}:
                 return self._send(404,'{"error":"not found"}')
             if self.headers.get("X-LVS-Token")!=token:
                 return self._send(403,'{"error":"invalid local token"}')
@@ -137,6 +137,23 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                     raise ValueError("Expected object")
             except (ValueError,UnicodeDecodeError):
                 return self._send(400,'{"error":"invalid body"}')
+            if self.path=="/api/campaign/recovery-info":
+                if set(data)!={"quote_id"} or not isinstance(data["quote_id"],str):
+                    return self._send(400,'{"error":"expected quote_id"}')
+                try:
+                    with sqlite3.connect(db_path,timeout=5) as db:
+                        row=db.execute("""SELECT b.campaign_id,b.sequence,a.wallet,a.stage
+                            FROM rebalance_campaign_quote_bindings b
+                            JOIN live_deposit_authorizations a ON a.quote_id=b.quote_id
+                            JOIN rebalance_campaigns c ON c.campaign_id=b.campaign_id
+                            WHERE b.quote_id=? AND c.state='ACTIVE'""",
+                            (data["quote_id"],)).fetchone()
+                    if row is None or row[2]!=wallet.lower():
+                        return self._send(409,'{"error":"No active bound campaign transaction"}')
+                    return self._send(200,json.dumps({"status":"BOUND_AWAITING_RECEIPT",
+                        "campaign_id":row[0],"sequence":row[1],"stage":row[3]}))
+                except sqlite3.Error:
+                    return self._send(409,'{"error":"Campaign binding not available"}')
             if self.path=="/api/campaign/next":
                 if data!={}:
                     return self._send(400,'{"error":"expected empty object"}')
