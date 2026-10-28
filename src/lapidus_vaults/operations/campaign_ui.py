@@ -17,6 +17,11 @@ let campaignCurrentQuote=null;
 let campaignLastTx=null;
 let campaignSubmissionPhase='not_submitted';
 const campaignOut=(value)=>document.getElementById('campaignTxOutput').textContent=value;
+function campaignReceiptDisplay(receipt){
+ if(receipt.status==='PENDING_NOT_FOUND' || receipt.status==='PENDING_MATCHED_INPUT')
+  return 'TRANSACTION SUBMITTED; receipt not yet verified. Do not resend. Use Recheck campaign receipt.\\n'+JSON.stringify(receipt,null,2);
+ return JSON.stringify(receipt,null,2);
+}
 async function campaignVerifyWallet(){
  if(!window.ethereum)throw Error('MetaMask unavailable');
  const accounts=await window.ethereum.request({method:'eth_accounts'});
@@ -65,7 +70,7 @@ document.getElementById('campaignAuthorize').onclick=async()=>{
   const endpoint=ready.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
   const receipt=await campaignPost(endpoint,{quote_id:quoted.quote_id,tx_hash:hash});
   if(receipt.status==='RECEIPT_AND_BLOCK_MATCH')campaignSubmissionPhase='reconciled';
-  campaignOut(JSON.stringify(receipt,null,2));
+  campaignOut(campaignReceiptDisplay(receipt));
  }catch(e){
   if(campaignLastTx && campaignSubmissionPhase==='submitted_awaiting_receipt'){
    campaignOut('TRANSACTION SUBMITTED. Receipt check failed: '+e.message+'\\nTransaction: '+campaignLastTx.tx_hash+'\\nQuote: '+campaignLastTx.quote_id+'\\nDo not resend. Use Recheck campaign receipt or recovery.');
@@ -90,7 +95,7 @@ document.getElementById('campaignRecover').onclick=async()=>{
   const endpoint=details.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
   const checked=await campaignPost(endpoint,{quote_id,tx_hash});
   if(checked.status==='RECEIPT_AND_BLOCK_MATCH')campaignSubmissionPhase='reconciled';
-  campaignOut(JSON.stringify(checked,null,2));
+  campaignOut(campaignReceiptDisplay(checked));
  }catch(e){campaignOut('Campaign recovery blocked: '+e.message)}
 };
 document.getElementById('campaignReceipt').onclick=async()=>{
