@@ -20,6 +20,7 @@ def main(argv=None) -> int:
         ("console", "Start the local supervised MetaMask console"),
         ("campaign-create", "Persist a read-only supervised rebalance campaign"),
         ("fork-rehearsal", "Run local Anvil campaign and receipt-bridge integration"),
+        ("auto-fork", "Run an unattended campaign ONLY on a local Anvil Base fork"),
     ):
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
@@ -31,6 +32,7 @@ def main(argv=None) -> int:
         "console": local_console.main,
         "campaign-create": create_campaign.main,
         "fork-rehearsal": fork_campaign_rehearsal.main,
+        "auto-fork": fork_campaign_rehearsal.main,
     }
     return int(runners[args.command](rest))
 
