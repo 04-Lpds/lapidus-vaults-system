@@ -37,7 +37,7 @@ def setup_bound(tmp_path):
 
 def test_crash_after_binding_before_reservation_is_blocked(tmp_path):
     db=setup_bound(tmp_path)
-    with pytest.raises(RuntimeError, match="Orphaned bound quote"):
+    with pytest.raises(RuntimeError, match="no complete recovery journal"):
         assert_no_orphaned_authorizations(db)
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM autonomous_submissions").fetchone()[0] == 0 if (
