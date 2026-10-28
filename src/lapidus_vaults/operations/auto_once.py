@@ -175,7 +175,9 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
                 recovery=_recover(db_path,existing[0][0],entries,rpc)
                 if recovery is not None:
                     return recovery
-            # Also cover crashes after authorization/binding but before reserve.\n            assert_no_orphaned_authorizations(db_path)\n            with MorphoClient() as morpho:
+            # Also cover crashes after authorization/binding but before reserve.
+            assert_no_orphaned_authorizations(db_path)
+            with MorphoClient() as morpho:
                 report=build_live_readonly_plan(wallet, allowlist_path,rpc,morpho)
             observed_units=report["plan"]["capital_units"]
             action=next_auto_action(db_path,policy=policy,
