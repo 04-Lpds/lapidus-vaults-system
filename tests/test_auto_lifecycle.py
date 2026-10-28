@@ -83,7 +83,7 @@ def test_auto_runner_full_restart_and_unknown_receipt(tmp_path, monkeypatch):
     monkeypatch.setattr(auto_once,"DepositQuotes",FakeQuotes)
     monkeypatch.setattr(auto_once,"WithdrawalQuotes",FakeQuotes)
     monkeypatch.setattr(auto_once,"build_live_readonly_plan",
-        lambda *args:{"plan":{"capital_units":2_000_000}})
+        lambda *args,**kwargs:{"plan":{"capital_units":2_000_000}})
     monkeypatch.setattr(auto_once,"read_nonce",lambda *args:0)
 
     sent=[]
