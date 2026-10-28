@@ -21,3 +21,25 @@ def test_preflight_rejects_same_wallet_without_any_network(tmp_path):
         preflight(db_path=str(tmp_path/"whatever"),wallet=WALLET,
                   protected_wallet=WALLET,allowlist_path="fake",
                   rpc_url="https://example.invalid")
+
+def test_reports_real_eth_instead_of_claiming_zero(tmp_path, monkeypatch):
+    db=tmp_path/"executor.sqlite"
+    db.touch()
+    monkeypatch.setattr(auto_preflight,"read_policy",
+        lambda _: type("Policy",(),{"vault_addresses":("0x"+"2"*40,)})())
+    class FakeRPC:
+        def __init__(self,url): pass
+        def __enter__(self): return self
+        def __exit__(self,*args): pass
+        def chain_id(self): return 8453
+        def block_number(self): return 53187628
+        def eth_balance(self,wallet,block): return 1_000_000_000_000_000
+        def gas_price_wei(self): return 100_000_000
+    monkeypatch.setattr(auto_preflight,"ReadOnlyRPC",FakeRPC)
+    result=preflight(db_path=str(db),wallet=WALLET,
+                     protected_wallet=PROTECTED,allowlist_path="fake",
+                     rpc_url="https://example.invalid")
+    assert result["eth_balance_wei"]==1_000_000_000_000_000
+    assert result["legacy_eth_reserve_wei"]==2_000_000_000_000_000
+    assert result["status"]=="PREFLIGHT_ETH_RESERVE_BLOCKED"
+    assert result["submitted"] is False
