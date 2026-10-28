@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from lapidus_vaults.fork_roundtrip import ACTOR, VAULTS
 from lapidus_vaults.unsigned_candidates import UnsignedCandidate
-from lapidus_vaults.fork_candidate_rebalance import execute_candidates_locally
+from lapidus_vaults.testing.fork_candidate_rebalance import execute_candidates_locally
 
 
 def candidate(**overrides):

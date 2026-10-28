@@ -9,7 +9,7 @@ import json
 import sys
 import httpx
 
-from .fork_roundtrip import (
+from ..fork_roundtrip import (
     ForkRPC, VAULTS, ACTOR, BASE_USDC, APPROVE, DEPOSIT, WITHDRAW,
     addr_word, word,
 )

@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import Mock
 from dataclasses import asdict
 from decimal import Decimal
-from lapidus_vaults.fork_journaled_rebalance import execute_saved_manifest, save_fork_result
+from lapidus_vaults.testing.fork_journaled_rebalance import execute_saved_manifest, save_fork_result
 from lapidus_vaults.transaction_review import prepare_manifest, store_manifest
 from lapidus_vaults.manifest_preflight import load_manifest
 from lapidus_vaults.wallet_plan import Policy, WalletSnapshot, VaultHolding, build_rebalance

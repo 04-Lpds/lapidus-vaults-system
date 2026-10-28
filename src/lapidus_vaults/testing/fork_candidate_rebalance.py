@@ -11,14 +11,14 @@ from decimal import Decimal
 
 import httpx
 
-from .fork_roundtrip import (
+from ..fork_roundtrip import (
     ForkRPC, VAULTS, ACTOR, BASE_USDC, ASSET, APPROVE, DEPOSIT,
     addr_word, word,
 )
 from .fork_cross_rebalance import fork_snapshot, TEST_AMOUNT
-from .wallet_plan import Policy, build_rebalance
-from .safety_plan import build_safety_plan
-from .unsigned_candidates import make_unsigned_candidates, candidate_report
+from ..wallet_plan import Policy, build_rebalance
+from ..safety_plan import build_safety_plan
+from ..unsigned_candidates import make_unsigned_candidates, candidate_report
 
 TRANSFER = "0xa9059cbb"
 ALLOWANCE = "0xdd62ed3e"

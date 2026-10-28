@@ -17,6 +17,20 @@ let campaignCurrentQuote=null;
 let campaignLastTx=null;
 let campaignSubmissionPhase='not_submitted';
 const campaignOut=(value)=>document.getElementById('campaignTxOutput').textContent=value;
+async function campaignPollReceipt(last, attempts=8){
+ const endpoint=last.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
+ for(let i=0;i<attempts;i++){
+  const receipt=await campaignPost(endpoint,{quote_id:last.quote_id,tx_hash:last.tx_hash});
+  campaignOut(campaignReceiptDisplay(receipt));
+  if(!['PENDING_NOT_FOUND','PENDING_MATCHED_INPUT'].includes(receipt.status)){
+   if(receipt.status==='RECEIPT_AND_BLOCK_MATCH')campaignSubmissionPhase='reconciled';
+   return receipt;
+  }
+  if(i<attempts-1)await new Promise(resolve=>setTimeout(resolve,2500));
+ }
+ campaignOut('Receipt not verified after polling. Transaction '+last.tx_hash+' is already submitted. Do not resend; use Recheck campaign receipt later.');
+ return null;
+}
 function campaignReceiptDisplay(receipt){
  if(receipt.status==='PENDING_NOT_FOUND' || receipt.status==='PENDING_MATCHED_INPUT')
   return 'TRANSACTION SUBMITTED; receipt not yet verified. Do not resend. Use Recheck campaign receipt.\\n'+JSON.stringify(receipt,null,2);
@@ -67,10 +81,7 @@ document.getElementById('campaignAuthorize').onclick=async()=>{
   campaignLastTx={quote_id:quoted.quote_id,tx_hash:hash,stage:ready.stage};
   document.getElementById('campaignReceipt').disabled=false;
   campaignOut('Submitted '+hash+'. Checking receipt...');
-  const endpoint=ready.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
-  const receipt=await campaignPost(endpoint,{quote_id:quoted.quote_id,tx_hash:hash});
-  if(receipt.status==='RECEIPT_AND_BLOCK_MATCH')campaignSubmissionPhase='reconciled';
-  campaignOut(campaignReceiptDisplay(receipt));
+  await campaignPollReceipt(campaignLastTx);
  }catch(e){
   if(campaignLastTx && campaignSubmissionPhase==='submitted_awaiting_receipt'){
    campaignOut('TRANSACTION SUBMITTED. Receipt check failed: '+e.message+'\\nTransaction: '+campaignLastTx.tx_hash+'\\nQuote: '+campaignLastTx.quote_id+'\\nDo not resend. Use Recheck campaign receipt or recovery.');

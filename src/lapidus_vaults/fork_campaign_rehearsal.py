@@ -25,6 +25,7 @@ from .live_deposit import DepositQuotes
 from .live_withdraw import WithdrawalQuotes
 from .rpc_verify import ReadOnlyRPC
 from .operations.next_action import next_campaign_action
+from .operations.auto_journal import reserve, mark_submitted, mark_verified, current as auto_journal_current
 
 
 
@@ -143,9 +144,16 @@ def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
                         consumed["amount_units"], json.dumps(consumed, sort_keys=True)
                     ))
             bind_campaign_quote(db_path, campaign_id, i, quoted["quote_id"])
+            # Commit a durable submission reservation BEFORE the local send.
+            # A crash at this point is deliberately not automatically retried.
+            reserve(db_path, campaign_id=campaign_id, sequence=i,
+                    quote_id=quoted["quote_id"], wallet=wallet,
+                    to_address=target, calldata=data, amount_units=amount)
 
             receipt = rpc.transact(target, wallet, data, step=f"campaign {method}")
             tx_hash = receipt["transactionHash"]
+            mark_submitted(db_path, campaign_id=campaign_id, sequence=i,
+                           quote_id=quoted["quote_id"], tx_hash=tx_hash)
 
             # Simulate application restart: in-memory consumed quotes are gone.
             # Recover the exact original authorization from SQLite.
@@ -161,6 +169,8 @@ def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
             verified = fresh_engine.check_receipt(read_rpc, quoted["quote_id"], tx_hash)
             if verified["status"] != "RECEIPT_AND_BLOCK_MATCH":
                 raise RuntimeError(f"Production receipt checker rejected step {i}: {verified['status']}")
+            mark_verified(db_path, campaign_id=campaign_id, sequence=i,
+                          tx_hash=tx_hash, verified=verified)
             state = advance_bound_campaign(db_path, quoted["quote_id"], verified)
             if state is None:
                 raise RuntimeError("Production bound receipt bridge did not advance")
@@ -195,12 +205,13 @@ def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
         "campaign_id": campaign_id, "campaign_state": completed["state"],
         "sqlite_db": db_path, "sqlite_campaign_rows": campaign_rows,
         "sqlite_step_rows": step_rows, "actor": wallet,
+        "autonomous_journal": auto_journal_current(db_path, campaign_id),
         "cash_initial_units": initial_cash, "cash_final_units": final_cash,
         "source_shares_initial": initial_source, "source_shares_final": final_source,
         "destination_shares_initial": initial_dest,
         "destination_shares_final": final_dest, "receipts": receipts,
-        "scope": "Production quote/consume, persisted authorization recovery, production receipt checker and receipt_bridge on local fork",
-        "not_tested": "Browser MetaMask UI, real Base transaction submission, autonomous execution",
+        "scope": "Production quote/consume, durable automatic reservation, persisted recovery, receipt checker and bridge on local fork",
+        "not_tested": "Browser MetaMask UI, real Base transaction submission, unattended MAINNET execution",
     }
 
 

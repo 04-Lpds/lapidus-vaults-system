@@ -171,7 +171,8 @@ def make_handler(wallet: str, allowlist: str, db_path: str, token: str):
                         exists=db.execute("""SELECT name FROM sqlite_master
                             WHERE type='table' AND name='rebalance_campaigns'""").fetchone()
                         row=(db.execute("""SELECT campaign_id FROM rebalance_campaigns
-                            WHERE state='ACTIVE' ORDER BY created_at DESC LIMIT 1""").fetchone()
+                            ORDER BY CASE WHEN state='ACTIVE' THEN 0 ELSE 1 END,
+                            created_at DESC LIMIT 1""").fetchone()
                             if exists else None)
                     response=read_campaign(db_path,row[0]) if row else {"status":"NO_ACTIVE_CAMPAIGN"}
                     return self._send(200,json.dumps(response))

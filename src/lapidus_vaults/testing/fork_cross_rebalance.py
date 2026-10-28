@@ -9,9 +9,9 @@ import sys
 import httpx
 from decimal import Decimal
 
-from .allocator import BASE_CHAIN
-from .wallet_plan import Policy, WalletSnapshot, VaultHolding, build_rebalance
-from .fork_roundtrip import (
+from ..allocator import BASE_CHAIN
+from ..wallet_plan import Policy, WalletSnapshot, VaultHolding, build_rebalance
+from ..fork_roundtrip import (
     ForkRPC, VAULTS, ACTOR, BASE_USDC, APPROVE, DEPOSIT, WITHDRAW,
     addr_word, word, ASSET,
 )

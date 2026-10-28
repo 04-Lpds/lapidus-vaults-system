@@ -2,7 +2,7 @@
 from decimal import Decimal
 from dataclasses import replace
 import pytest
-from lapidus_vaults.fork_cross_rebalance import order_actions, validate_planned_cash, POLICY
+from lapidus_vaults.testing.fork_cross_rebalance import order_actions, validate_planned_cash, POLICY
 from lapidus_vaults.fork_roundtrip import VAULTS, ACTOR
 from lapidus_vaults.wallet_plan import (
     WalletSnapshot, VaultHolding, build_rebalance,
