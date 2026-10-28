@@ -6,6 +6,10 @@ LIVE_CAMPAIGN_HTML = r"""
 <button id="campaignQuote">Request next-step quote</button>
 <button id="campaignAuthorize" disabled>Review and authorize campaign step</button>
 <button id="campaignReceipt" disabled>Recheck campaign receipt</button>
+<p>Recover a previously authorized transaction after a restart: enter the campaign quote ID and its Base transaction hash. This only checks the existing receipt.</p>
+<label>Quote ID <input id="campaignRecoveryQuote" type="text" style="padding:8px"></label>
+<label>Transaction hash <input id="campaignRecoveryHash" type="text" style="padding:8px"></label>
+<button id="campaignRecover">Recover campaign transaction</button>
 <pre id="campaignTxOutput">No campaign quote requested.</pre>
 </section>
 <script>
@@ -61,6 +65,21 @@ document.getElementById('campaignAuthorize').onclick=async()=>{
  }catch(e){
   campaignOut('Stopped: '+e.message+'. If MetaMask submitted, check wallet activity before any new attempt.');
  }
+};
+document.getElementById('campaignRecover').onclick=async()=>{
+ try{
+  await campaignVerifyWallet();
+  const quote_id=document.getElementById('campaignRecoveryQuote').value.trim();
+  const tx_hash=document.getElementById('campaignRecoveryHash').value.trim();
+  if(!/^[A-Za-z0-9_-]{20,100}$/.test(quote_id) || !/^0x[0-9a-fA-F]{64}$/.test(tx_hash))
+   throw Error('Invalid quote ID or transaction hash');
+  const details=await campaignPost('/api/campaign/recovery-info',{quote_id:quote_id});
+  if(details.status!=='BOUND_AWAITING_RECEIPT')throw Error('Quote is not bound to an active campaign');
+  campaignLastTx={quote_id,tx_hash,stage:details.stage};
+  document.getElementById('campaignReceipt').disabled=false;
+  const endpoint=details.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
+  campaignOut(JSON.stringify(await campaignPost(endpoint,{quote_id,tx_hash}),null,2));
+ }catch(e){campaignOut('Campaign recovery blocked: '+e.message)}
 };
 document.getElementById('campaignReceipt').onclick=async()=>{
  if(!campaignLastTx)return;
