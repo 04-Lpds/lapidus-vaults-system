@@ -205,12 +205,13 @@ def run_campaign_fork(rpc: ForkRPC, wallet: str, source: str,
         "campaign_id": campaign_id, "campaign_state": completed["state"],
         "sqlite_db": db_path, "sqlite_campaign_rows": campaign_rows,
         "sqlite_step_rows": step_rows, "actor": wallet,
+        "autonomous_journal": auto_journal_current(db_path, campaign_id),
         "cash_initial_units": initial_cash, "cash_final_units": final_cash,
         "source_shares_initial": initial_source, "source_shares_final": final_source,
         "destination_shares_initial": initial_dest,
         "destination_shares_final": final_dest, "receipts": receipts,
-        "scope": "Production quote/consume, persisted authorization recovery, production receipt checker and receipt_bridge on local fork",
-        "not_tested": "Browser MetaMask UI, real Base transaction submission, autonomous execution",
+        "scope": "Production quote/consume, durable automatic reservation, persisted recovery, receipt checker and bridge on local fork",
+        "not_tested": "Browser MetaMask UI, real Base transaction submission, unattended MAINNET execution",
     }
 
 
