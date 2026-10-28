@@ -23,13 +23,14 @@ def main(argv=None) -> int:
         ("auto-fork", "Run an unattended campaign ONLY on a local Anvil Base fork"),
         ("auto-once", "Experimental dedicated-wallet live executor; disabled unless explicitly enabled"),
         ("auto-preflight", "Keyless read-only funded-wallet and campaign preflight"),
+        ("auto-trial", "Create an exact 0.8 USDC non-executable executor campaign"),
         ("signed-fork", "EIP-1559 signer test with disposable key on local Anvil"),
         ("auto-lifecycle-fork", "Full signed auto campaign and restart recovery on local Anvil"),
     ):
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign, auto_once, auto_preflight
+    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign
     from .testing import signed_fork_rehearsal, auto_lifecycle_fork
 
     runners = {
@@ -40,6 +41,7 @@ def main(argv=None) -> int:
         "auto-fork": fork_campaign_rehearsal.main,
         "auto-once": auto_once.main,
         "auto-preflight": auto_preflight.main,
+        "auto-trial": auto_trial_campaign.main,
         "signed-fork": signed_fork_rehearsal.main,
         "auto-lifecycle-fork": auto_lifecycle_fork.main,
     }
