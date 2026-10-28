@@ -79,6 +79,49 @@ class MorphoClient:
             raise MorphoAPIError(f"Unexpected vault APY for {selector}")
         return response["data"]
 
+    def v2_exposures(self, chain_id: int, vault_address: str) -> dict[str, Any]:
+        """GraphQL market positions and adapter balances; read only.
+
+        Query limits are currently 100 adapters / 100 positions per adapter.
+        The normalization layer flags possible truncation and nested vaults.
+        """
+        from .exposures import MAX_API_ITEMS
+        if chain_id <= 0 or not isinstance(vault_address, str) or len(vault_address) != 42:
+            raise ValueError("Valid chain ID and vault address required")
+        query = f"""query VaultV2Exposure($address: String!, $chainId: Int!) {{
+          vaultV2ByAddress(address: $address, chainId: $chainId) {{
+            address name totalAssets idleAssets
+            adapters(first: {MAX_API_ITEMS}) {{ items {{
+              __typename address assets type
+              ... on MorphoMarketV1Adapter {{
+                positions(first: {MAX_API_ITEMS}) {{ items {{
+                  market {{ marketId collateralAsset {{ symbol }} loanAsset {{ symbol }} }}
+                  state {{ supplyAssets }}
+                }} }}
+              }}
+              ... on MetaMorphoAdapter {{ metaMorpho {{ address name }} }}
+              ... on MorphoVaultV2Adapter {{ innerVault {{ address name }} }}
+            }} }}
+          }}
+        }}"""
+        try:
+            response = self.http.post('/graphql', json={
+                'query': query,
+                'variables': {'address': vault_address, 'chainId': chain_id},
+            })
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise MorphoAPIError(f"Morpho GraphQL failure: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise MorphoAPIError('Unexpected GraphQL response format')
+        if payload.get('errors'):
+            raise MorphoAPIError(f"Morpho GraphQL errors: {payload['errors']}")
+        result = payload.get('data')
+        if not isinstance(result, dict) or not isinstance(result.get('vaultV2ByAddress'), dict):
+            raise MorphoAPIError('GraphQL missing vaultV2ByAddress')
+        return result['vaultV2ByAddress']
+
     def close(self) -> None:
         if self._owns_client:
             self.http.close()
