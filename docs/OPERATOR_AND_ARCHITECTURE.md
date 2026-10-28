@@ -24,10 +24,10 @@ after `pip install -e .`):
 - `fork_roundtrip.py` + `fork_campaign_rehearsal.py`: loopback-only fork test foundation.
 
 Earlier `fork_cross_rebalance`, `fork_candidate_rebalance`,
-`fork_exit_scenarios`, `fork_journaled_rebalance`, and `fork_two_vaults`
-are **legacy diagnostic/test modules**, not production entry points.
-They remain importable until their test fixtures and imports are migrated.
-Do not interpret their presence as separate production executors.
+`fork_exit_scenarios`, and `fork_journaled_rebalance` have been moved to
+`lapidus_vaults.testing` and their offline tests updated. `fork_two_vaults`
+remains as a compatibility diagnostic and `fork_roundtrip` as a shared fork
+transport. These are **not production execution entry points**.
 
 ## Current execution boundary
 
