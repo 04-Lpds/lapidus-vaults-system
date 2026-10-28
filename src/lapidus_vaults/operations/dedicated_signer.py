@@ -11,6 +11,8 @@ import sqlite3
 import httpx
 
 from ..allocator import BASE_CHAIN, BASE_USDC, address_ok
+from ..rpc_verify import _address_word, _word
+from ..unsigned_candidates import APPROVE, DEPOSIT, WITHDRAW
 from .auto_journal import reserve, mark_submitted
 
 MAX_ACTION_UNITS = 1_000_000
@@ -58,6 +60,14 @@ def prepare_signed_transaction(*, consumed: dict, candidate: dict,
         raise ValueError("Vault not permitted by dedicated signer policy")
     if not address_ok(vault) or not address_ok(to):
         raise ValueError("Invalid execution target")
+    amount = consumed["amount_units"]
+    expected_data = (
+        APPROVE + _address_word(vault) + _word(amount) if stage == "approve" else
+        DEPOSIT + _word(amount) + _address_word(signer) if stage == "deposit" else
+        WITHDRAW + _word(amount) + _address_word(signer) + _address_word(signer)
+    )
+    if consumed["data"].lower() != expected_data:
+        raise ValueError("Calldata is not exact bounded vault operation")
     if consumed.get("value") != "0x0":
         raise ValueError("ETH value must be zero")
     gas = int(consumed["gas"], 16)
