@@ -34,7 +34,7 @@ class FakeClient:
 class FakeQuotes:
     quote_seq = 0
     receipt_ready = False
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.pending={}
         self.consumed={}
     def quote(self, rpc, *, wallet, vault, approved_vaults, amount_units):
