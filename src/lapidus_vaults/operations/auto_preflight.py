@@ -87,7 +87,7 @@ def preflight(*, db_path: str, wallet: str, protected_wallet: str,
             return result
         q=quote_next_campaign_action(
             db_path,wallet=wallet,approved_vaults=policy.vault_allowlist,
-            rpc=rpc,deposits=DepositQuotes(),withdrawals=WithdrawalQuotes())
+            rpc=rpc,deposits=DepositQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE),withdrawals=WithdrawalQuotes())
         gas=int(q["gas"],16)
         worst_fee=gas*gas_price*2
         result.update(
