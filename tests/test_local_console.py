@@ -109,3 +109,36 @@ def test_campaign_status_without_active_campaign_is_read_only(tmp_path):
         finally:
             server.shutdown()
             worker.join()
+
+def test_campaign_recovery_requires_bound_quote_and_matching_wallet(tmp_path):
+    import json
+    import sqlite3
+    db_path=str(tmp_path/"recovery.sqlite")
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE rebalance_campaigns (campaign_id TEXT, state TEXT)")
+        db.execute("INSERT INTO rebalance_campaigns VALUES ('run','ACTIVE')")
+        db.execute("CREATE TABLE rebalance_campaign_quote_bindings (quote_id TEXT,campaign_id TEXT,sequence INTEGER)")
+        db.execute("INSERT INTO rebalance_campaign_quote_bindings VALUES ('quote-1','run',1)")
+        db.execute("CREATE TABLE live_deposit_authorizations (quote_id TEXT,wallet TEXT,stage TEXT)")
+        db.execute("INSERT INTO live_deposit_authorizations VALUES (?,?,?)",('quote-1',ACTOR.lower(),'withdraw'))
+    handler=make_handler(ACTOR.lower(),"unused",db_path,"test-token")
+    with ThreadingHTTPServer(("127.0.0.1",0),handler) as server:
+        worker=threading.Thread(target=server.serve_forever,daemon=True)
+        worker.start()
+        try:
+            for quote_id,code in (("quote-1",200),("unknown",409)):
+                conn=HTTPConnection("127.0.0.1",server.server_port)
+                conn.request("POST","/api/campaign/recovery-info",
+                    body=json.dumps({"quote_id":quote_id}),headers={
+                    "Host":"127.0.0.1:8765","Content-Type":"application/json",
+                    "X-LVS-Token":"test-token"})
+                result=conn.getresponse()
+                body=json.loads(result.read())
+                assert result.status==code
+                if code==200:
+                    assert body["stage"]=="withdraw"
+                    assert body["status"]=="BOUND_AWAITING_RECEIPT"
+                conn.close()
+        finally:
+            server.shutdown()
+            worker.join()
