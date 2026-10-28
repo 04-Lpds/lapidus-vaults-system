@@ -15,6 +15,7 @@ LIVE_CAMPAIGN_HTML = r"""
 <script>
 let campaignCurrentQuote=null;
 let campaignLastTx=null;
+let campaignSubmissionPhase='not_submitted';
 const campaignOut=(value)=>document.getElementById('campaignTxOutput').textContent=value;
 async function campaignVerifyWallet(){
  if(!window.ethereum)throw Error('MetaMask unavailable');
@@ -53,17 +54,26 @@ document.getElementById('campaignAuthorize').onclick=async()=>{
    quoted.to+'. Check MetaMask carefully. No automatic subsequent step.';
   if(!window.confirm(message))return;
   const ready=await campaignPost('/api/campaign/consume',{quote_id:quoted.quote_id});
+  campaignSubmissionPhase='journaled_awaiting_wallet';
   await campaignVerifyWallet();
   const tx={from:ready.wallet,to:ready.to,data:ready.data,value:ready.value,gas:ready.gas};
   const hash=await window.ethereum.request({method:'eth_sendTransaction',params:[tx]});
+  campaignSubmissionPhase='submitted_awaiting_receipt';
   campaignLastTx={quote_id:quoted.quote_id,tx_hash:hash,stage:ready.stage};
   document.getElementById('campaignReceipt').disabled=false;
   campaignOut('Submitted '+hash+'. Checking receipt...');
   const endpoint=ready.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
   const receipt=await campaignPost(endpoint,{quote_id:quoted.quote_id,tx_hash:hash});
+  if(receipt.status==='RECEIPT_AND_BLOCK_MATCH')campaignSubmissionPhase='reconciled';
   campaignOut(JSON.stringify(receipt,null,2));
  }catch(e){
-  campaignOut('Stopped: '+e.message+'. If MetaMask submitted, check wallet activity before any new attempt.');
+  if(campaignLastTx && campaignSubmissionPhase==='submitted_awaiting_receipt'){
+   campaignOut('TRANSACTION SUBMITTED. Receipt check failed: '+e.message+'\\nTransaction: '+campaignLastTx.tx_hash+'\\nQuote: '+campaignLastTx.quote_id+'\\nDo not resend. Use Recheck campaign receipt or recovery.');
+  }else if(campaignSubmissionPhase==='journaled_awaiting_wallet'){
+   campaignOut('Authorization journaled, but wallet submission is unconfirmed. Check MetaMask activity before retrying. Quote: '+quoted.quote_id+'\\nDetails: '+e.message);
+  }else{
+   campaignOut('No transaction hash received by LVS. Check MetaMask activity before any retry. '+e.message);
+  }
  }
 };
 document.getElementById('campaignRecover').onclick=async()=>{
@@ -78,7 +88,9 @@ document.getElementById('campaignRecover').onclick=async()=>{
   campaignLastTx={quote_id,tx_hash,stage:details.stage};
   document.getElementById('campaignReceipt').disabled=false;
   const endpoint=details.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
-  campaignOut(JSON.stringify(await campaignPost(endpoint,{quote_id,tx_hash}),null,2));
+  const checked=await campaignPost(endpoint,{quote_id,tx_hash});
+  if(checked.status==='RECEIPT_AND_BLOCK_MATCH')campaignSubmissionPhase='reconciled';
+  campaignOut(JSON.stringify(checked,null,2));
  }catch(e){campaignOut('Campaign recovery blocked: '+e.message)}
 };
 document.getElementById('campaignReceipt').onclick=async()=>{
@@ -86,8 +98,10 @@ document.getElementById('campaignReceipt').onclick=async()=>{
  try{
   await campaignVerifyWallet();
   const endpoint=campaignLastTx.stage==='withdraw'?'/api/withdraw/check':'/api/deposit/check';
-  campaignOut(JSON.stringify(await campaignPost(endpoint,{
-   quote_id:campaignLastTx.quote_id,tx_hash:campaignLastTx.tx_hash}),null,2));
+  const checked=await campaignPost(endpoint,{
+   quote_id:campaignLastTx.quote_id,tx_hash:campaignLastTx.tx_hash});
+  if(checked.status==='RECEIPT_AND_BLOCK_MATCH')campaignSubmissionPhase='reconciled';
+  campaignOut(JSON.stringify(checked,null,2));
  }catch(e){campaignOut('Campaign receipt check failed: '+e.message)}
 };
 </script>
