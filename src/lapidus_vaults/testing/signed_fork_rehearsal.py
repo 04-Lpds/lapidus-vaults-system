@@ -72,7 +72,10 @@ def run_signed_fork(rpc: ForkRPC, holder: str, vault: str) -> dict:
         signed=prepare_signed_transaction(
             consumed=consumed,candidate=candidate,policy_wallet=wallet,
             protected_wallet=holder,private_key=key,nonce=nonce,
-            gas_price_wei=read.gas_price_wei(),approved_vaults=(vault,)
+            gas_price_wei=read.gas_price_wei(),approved_vaults=(vault,),
+            # Anvil may inherit Base fork gas pricing much higher than the
+            # production live cap. This override is LOCAL TEST ONLY.
+            max_total_fee_wei=5_000_000_000_000_000
         )
         tx_hash=_send(rpc,signed["raw"],signed["tx_hash"])
         result=engine.check_receipt(read,quote["quote_id"],tx_hash)
