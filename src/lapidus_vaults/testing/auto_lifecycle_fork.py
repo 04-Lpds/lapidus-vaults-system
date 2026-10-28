@@ -87,115 +87,117 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str) -> dict:
                           wallet, vault, 0, data_deposit, amount),
     )
     # Test journal is always isolated from operator's persistent DB.
-    with tempfile.TemporaryDirectory(prefix="lvs-auto-lifecycle-") as temporary:
-        db_path = str(Path(temporary) / "fork-only.sqlite3")
-        campaign_id = "local-autonomous-restart"
-        create_campaign(db_path, campaign_id, actions)
-        sends = []
+    temporary = tempfile.mkdtemp(prefix="lvs-auto-lifecycle-")
+    db_path = str(Path(temporary) / "fork-only.sqlite3")
+    campaign_id = "local-autonomous-restart"
+    create_campaign(db_path, campaign_id, actions)
+    sends = []
 
-        def fork_broadcast(**kwargs):
-            signed = prepare_signed_transaction(
-                consumed=kwargs["consumed"], candidate=kwargs["candidate"],
-                policy_wallet=kwargs["policy_wallet"],
-                protected_wallet=kwargs["protected_wallet"],
-                private_key=kwargs["private_key"],
-                nonce=kwargs["nonce"],
-                gas_price_wei=kwargs["gas_price_wei"],
-                approved_vaults=kwargs["approved_vaults"],
-                # Synthetic fork prices only; live default cap remains unchanged.
-                max_total_fee_wei=5_000_000_000_000_000,
-            )
-            reserve(db_path, campaign_id=kwargs["campaign_id"],
-                    sequence=kwargs["sequence"], quote_id=kwargs["quote_id"],
-                    wallet=wallet, to_address=kwargs["consumed"]["to"],
-                    calldata=kwargs["consumed"]["data"], amount_units=amount)
-            # Signed hash must exist in SQLite BEFORE any network activity.
-            mark_submitted(db_path, campaign_id=kwargs["campaign_id"],
-                           sequence=kwargs["sequence"], quote_id=kwargs["quote_id"],
-                           tx_hash=signed["tx_hash"])
-            if len(sends) >= 2:
-                raise RuntimeError("Unexpected third send")
-            _send(rpc, signed["raw"], signed["tx_hash"])
-            sends.append(signed["tx_hash"])
-            return {"state": "SUBMITTED", "tx_hash": signed["tx_hash"]}
+    def fork_broadcast(**kwargs):
+        signed = prepare_signed_transaction(
+            consumed=kwargs["consumed"], candidate=kwargs["candidate"],
+            policy_wallet=kwargs["policy_wallet"],
+            protected_wallet=kwargs["protected_wallet"],
+            private_key=kwargs["private_key"],
+            nonce=kwargs["nonce"],
+            gas_price_wei=kwargs["gas_price_wei"],
+            approved_vaults=kwargs["approved_vaults"],
+            # Synthetic fork prices only; live default cap remains unchanged.
+            max_total_fee_wei=5_000_000_000_000_000,
+        )
+        reserve(db_path, campaign_id=kwargs["campaign_id"],
+                sequence=kwargs["sequence"], quote_id=kwargs["quote_id"],
+                wallet=wallet, to_address=kwargs["consumed"]["to"],
+                calldata=kwargs["consumed"]["data"], amount_units=amount)
+        # Signed hash must exist in SQLite BEFORE any network activity.
+        mark_submitted(db_path, campaign_id=kwargs["campaign_id"],
+                       sequence=kwargs["sequence"], quote_id=kwargs["quote_id"],
+                       tx_hash=signed["tx_hash"])
+        if len(sends) >= 2:
+            raise RuntimeError("Unexpected third send")
+        _send(rpc, signed["raw"], signed["tx_hash"])
+        sends.append(signed["tx_hash"])
+        return {"state": "SUBMITTED", "tx_hash": signed["tx_hash"]}
 
-        def nonce(_url, address, tag):
-            return int(rpc.call("eth_getTransactionCount", [address, tag]), 16)
+    def nonce(_url, address, tag):
+        return int(rpc.call("eth_getTransactionCount", [address, tag]), 16)
 
-        def step():
-            return auto_once.execute_once(
-                db_path=db_path, wallet=wallet,
-                protected_wallet=holder.lower(), approved_vaults=(vault,),
-                allowlist_path="local-only-allowlist",
-                rpc_url="https://local-only.invalid",
-                private_key=secret, max_capital_units=10_000_000,
-            )
+    def step():
+        return auto_once.execute_once(
+            db_path=db_path, wallet=wallet,
+            protected_wallet=holder.lower(), approved_vaults=(vault,),
+            allowlist_path="local-only-allowlist",
+            rpc_url="https://local-only.invalid",
+            private_key=secret, max_capital_units=10_000_000,
+        )
 
-        patches = [
-            patch.object(auto_once, "ReadOnlyRPC",
-                         lambda _: _read_adapter(rpc)),
-            patch.object(auto_once, "MorphoClient", _UnusedClient),
-            patch.object(auto_once, "build_live_readonly_plan",
-                         lambda *a: {"plan": {"capital_units": amount}}),
-            patch.object(auto_once, "read_nonce", nonce),
-            patch.object(auto_once, "reserve_and_broadcast", fork_broadcast),
-        ]
-        for p in patches:
-            p.start()
-        try:
-            # Simulated scheduler invocation 1: real signed approve on Anvil.
-            first = step()
-            if first.get("state") != "SUBMITTED" or len(sends) != 1:
-                raise RuntimeError("First autonomous step was not submitted")
+    patches = [
+        patch.object(auto_once, "ReadOnlyRPC",
+                     lambda _: _read_adapter(rpc)),
+        patch.object(auto_once, "MorphoClient", _UnusedClient),
+        patch.object(auto_once, "build_live_readonly_plan",
+                     lambda *a: {"plan": {"capital_units": amount}}),
+        patch.object(auto_once, "read_nonce", nonce),
+        patch.object(auto_once, "reserve_and_broadcast", fork_broadcast),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        # Simulated scheduler invocation 1: real signed approve on Anvil.
+        first = step()
+        if first.get("state") != "SUBMITTED" or len(sends) != 1:
+            raise RuntimeError("First autonomous step was not submitted")
 
-            # Restart with an unindexed receipt: never resend.
-            with patch.object(auto_once, "DepositQuotes", _PendingOnce):
-                pending = step()
-            if pending["status"] != "PENDING_NOT_FOUND" or len(sends) != 1:
-                raise RuntimeError("Pending receipt incorrectly triggered resend")
+        # Restart with an unindexed receipt: never resend.
+        with patch.object(auto_once, "DepositQuotes", _PendingOnce):
+            pending = step()
+        if pending["status"] != "PENDING_NOT_FOUND" or len(sends) != 1:
+            raise RuntimeError("Pending receipt incorrectly triggered resend")
 
-            # Next restart recovers approval from SQLite.
-            recovered_first = step()
-            if recovered_first["status"] != "RECEIPT_AND_BLOCK_MATCH":
-                raise RuntimeError("Signed approval recovery failed")
+        # Next restart recovers approval from SQLite.
+        recovered_first = step()
+        if recovered_first["status"] != "RECEIPT_AND_BLOCK_MATCH":
+            raise RuntimeError("Signed approval recovery failed")
 
-            # Next invocation submits signed deposit.
-            second = step()
-            if second.get("state") != "SUBMITTED" or len(sends) != 2:
-                raise RuntimeError("Second autonomous step was not submitted")
+        # Next invocation submits signed deposit.
+        second = step()
+        if second.get("state") != "SUBMITTED" or len(sends) != 2:
+            raise RuntimeError("Second autonomous step was not submitted")
 
-            # Recovery confirms final deposit and completes campaign.
-            recovered_second = step()
-            if recovered_second["status"] != "RECEIPT_AND_BLOCK_MATCH":
-                raise RuntimeError("Signed deposit recovery failed")
-            completed = read_campaign(db_path, campaign_id)
-            if completed["state"] != "COMPLETED":
-                raise RuntimeError("Automatic campaign failed to complete")
+        # Recovery confirms final deposit and completes campaign.
+        recovered_second = step()
+        if recovered_second["status"] != "RECEIPT_AND_BLOCK_MATCH":
+            raise RuntimeError("Signed deposit recovery failed")
+        completed = read_campaign(db_path, campaign_id)
+        if completed["state"] != "COMPLETED":
+            raise RuntimeError("Automatic campaign failed to complete")
 
-            after = step()
-            if after["status"] != "NO_ACTIVE_CAMPAIGN" or len(sends) != 2:
-                raise RuntimeError("Completed campaign resubmitted an action")
-            journal = current(db_path, campaign_id)
-            if [e["state"] for e in journal] != ["CONFIRMED", "CONFIRMED"]:
-                raise RuntimeError("Autonomous SQLite journal is incomplete")
-            if rpc.balance(BASE_USDC, wallet) != 0 or rpc.balance(vault, wallet) <= 0:
-                raise RuntimeError("Final fork wallet balances mismatch")
+        after = step()
+        if after["status"] != "NO_ACTIVE_CAMPAIGN" or len(sends) != 2:
+            raise RuntimeError("Completed campaign resubmitted an action")
+        journal = current(db_path, campaign_id)
+        if [e["state"] for e in journal] != ["CONFIRMED", "CONFIRMED"]:
+            raise RuntimeError("Autonomous SQLite journal is incomplete")
+        if rpc.balance(BASE_USDC, wallet) != 0 or rpc.balance(vault, wallet) <= 0:
+            raise RuntimeError("Final fork wallet balances mismatch")
 
-            return {
-                "status": "AUTO_LIFECYCLE_FORK_PASSED",
-                "campaign_id": campaign_id,
-                "campaign_state": completed["state"],
-                "disposable_wallet": wallet,
-                "signed_transactions": sends,
-                "journal": journal,
-                "pending_without_resend": True,
-                "recovered_after_restart": True,
-                "repeated_submission_count": len(sends),
-                "mainnet_broadcast": False,
-            }
-        finally:
-            for p in reversed(patches):
-                p.stop()
+        return {
+            "status": "AUTO_LIFECYCLE_FORK_PASSED",
+            "campaign_id": campaign_id,
+            "campaign_state": completed["state"],
+            "disposable_wallet": wallet,
+            "signed_transactions": sends,
+            "journal": journal,
+            "pending_without_resend": True,
+            "recovered_after_restart": True,
+            "repeated_submission_count": len(sends),
+            "mainnet_broadcast": False,
+            "sqlite_db": db_path,
+            "sqlite_note": "Disposable local-fork journal retained for inspection; delete later.",
+        }
+    finally:
+        for p in reversed(patches):
+            p.stop()
 
 
 def main(argv=None):
