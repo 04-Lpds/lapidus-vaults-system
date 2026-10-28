@@ -68,7 +68,7 @@ def _load_consumed(db_path: str, quote_id: str) -> dict:
     return json.loads(row[0])
 
 
-def _recover(db_path: str, entries: list[dict], rpc: ReadOnlyRPC) -> dict | None:
+def _recover(db_path: str, campaign_id: str, entries: list[dict], rpc: ReadOnlyRPC) -> dict | None:
     # Stop on ANY unknown or submitted transaction, even from a prior campaign.
     outstanding = [e for e in entries if e["state"] != "CONFIRMED"]
     if not outstanding:
@@ -85,7 +85,7 @@ def _recover(db_path: str, entries: list[dict], rpc: ReadOnlyRPC) -> dict | None
     verified=engine.check_receipt(rpc,quote_id,entry["tx_hash"])
     # Preserve independent receipt evidence through the actual bridge.
     if verified["status"]=="RECEIPT_AND_BLOCK_MATCH":
-        mark_verified(db_path,campaign_id=entry["campaign_id"],
+        mark_verified(db_path,campaign_id=campaign_id,
                       sequence=entry["sequence"],tx_hash=entry["tx_hash"],
                       verified=verified)
     result=advance_bound_campaign(db_path,quote_id,verified)
@@ -95,7 +95,7 @@ def _recover(db_path: str, entries: list[dict], rpc: ReadOnlyRPC) -> dict | None
 
 
 def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
-                 approved_vaults: tuple[str,...], rpc_url: str,
+                 approved_vaults: tuple[str,...], allowlist_path: str, rpc_url: str,
                  private_key: str, max_capital_units: int) -> dict:
     # No new action if an emergency stop file is present.
     if Path("data/STOP_AUTOMATION").exists():
@@ -130,11 +130,11 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
                 if len(existing)!=1:
                     raise RuntimeError("Multiple unresolved campaigns")
                 entries=current(db_path,existing[0][0])
-                recovery=_recover(db_path,entries,rpc)
+                recovery=_recover(db_path,existing[0][0],entries,rpc)
                 if recovery is not None:
                     return recovery
             with MorphoClient() as morpho:
-                report=build_live_readonly_plan(wallet, "data/paper_test_allowlist.json",rpc,morpho)
+                report=build_live_readonly_plan(wallet, allowlist_path,rpc,morpho)
             observed_units=report["plan"]["capital_units"]
             action=next_auto_action(db_path,policy=policy,
                                     observed_capital_units=observed_units,
@@ -204,7 +204,7 @@ def main(argv=None):
         approved=read_policy(args.allowlist).vault_addresses
         result=execute_once(
             db_path=args.db,wallet=args.wallet,protected_wallet=args.protected_wallet,
-            approved_vaults=approved,rpc_url=rpc_url,private_key=secret,
+            approved_vaults=approved,allowlist_path=args.allowlist,rpc_url=rpc_url,private_key=secret,
             max_capital_units=args.max_capital_usdc*1_000_000)
         # Never log RPC URLs, raw transactions, or secrets.
         print(json.dumps(result,indent=2))
