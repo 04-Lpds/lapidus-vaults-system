@@ -1,3 +1,26 @@
+## Keyless mainnet preflight (no signing or broadcast)
+
+After a dedicated campaign has been created in its own SQLite database, run:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m lapidus_vaults.operator auto-preflight \`
+  --wallet 0x3E62eEC622a1db01324A32e7837fb2eaE33fB0E3 \`
+  --protected-wallet 0x8685F85E3afcE79310658FB09d85BB98ecFc7EdE \`
+  --allowlist data/paper_test_allowlist.json \`
+  --db data/lvs_executor_test.sqlite3
+```
+
+The command does not read any signing key or send transactions. It reports live
+wallet capital, Base ETH for gas, campaign status, and (only when a campaign
+step exists) a fresh read-only quote simulation with fee-cap checks.
+An empty/no-active-campaign DB produces PREFLIGHT_READ_ONLY with
+NO_ACTIVE_CAMPAIGN; it does not create a campaign.
+
+If a quote binding exists without a matching autonomous journal, or a journal
+is confirmed without a matching bridged campaign receipt, auto-once and
+preflight halt rather than creating another quote. These require manual
+investigation; do not delete records to resume blindly.
+
 # Experimental dedicated-wallet unattended execution (v0.7)
 
 **Do not run `--execute-live` until CI, Anvil signed-transaction testing,
