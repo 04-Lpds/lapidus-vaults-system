@@ -80,9 +80,10 @@ def prepare_signed_transaction(*, consumed: dict, candidate: dict,
     priority_fee = min(gas_price_wei, 1_000_000_000)
     if gas * max_fee > MAX_TRANSACTION_FEE_WEI:
         raise ValueError("Worst-case transaction ETH fee exceeds cap")
+    from eth_utils import to_checksum_address
     unsigned = {
         "chainId": BASE_CHAIN, "type": 2, "nonce": nonce,
-        "to": to, "value": 0, "data": consumed["data"], "gas": gas,
+        "to": to_checksum_address(to), "value": 0, "data": consumed["data"], "gas": gas,
         "maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority_fee,
     }
     signed = Account.sign_transaction(unsigned, private_key)
