@@ -1,6 +1,6 @@
 """Pure reconciliation guardrails for fork-only exit scenarios."""
 import pytest
-from lapidus_vaults.fork_exit_scenarios import verify_exit_outcome
+from lapidus_vaults.testing.fork_exit_scenarios import verify_exit_outcome
 
 
 def test_partial_withdraw_reconciles():
