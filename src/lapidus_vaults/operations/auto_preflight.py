@@ -12,7 +12,7 @@ import sys
 
 from ..allocator import address_ok
 from ..rpc_verify import ReadOnlyRPC
-from ..live_readonly_plan import ETH_RESERVE
+from ..live_readonly_plan import ETH_RESERVE, DEDICATED_EXECUTOR_ETH_RESERVE
 from ..client import MorphoClient
 from ..live_readonly_plan import build_live_readonly_plan
 from ..wallet_plan import read_policy
@@ -53,20 +53,23 @@ def preflight(*, db_path: str, wallet: str, protected_wallet: str,
         gas_price=rpc.gas_price_wei()
         # Report actual balance before the legacy planner deducts its
         # conservative 0.002 ETH reserve, which can leave zero fee budget.
-        if eth_wei < ETH_RESERVE:
+        if eth_wei < DEDICATED_EXECUTOR_ETH_RESERVE:
             return {
                 "status":"PREFLIGHT_ETH_RESERVE_BLOCKED",
                 "wallet":wallet,"chain_id":chain,"rpc_block":block,
                 "eth_balance_wei":eth_wei,
                 "legacy_eth_reserve_wei":ETH_RESERVE,
-                "shortfall_wei":ETH_RESERVE-eth_wei,
+                "executor_eth_reserve_wei":DEDICATED_EXECUTOR_ETH_RESERVE,
+                "shortfall_wei":DEDICATED_EXECUTOR_ETH_RESERVE-eth_wei,
                 "gas_price_wei":gas_price,
                 "campaign_status":"NOT_EVALUATED_ETH_RESERVE",
                 "signing_key_accessed":False,"submitted":False,
-                "explanation":"Actual on-chain ETH is below the planner reserve; no transaction was authorized.",
+                "explanation":"Actual on-chain ETH is below the dedicated executor reserve; no transaction was authorized.",
             }
         with MorphoClient() as client:
-            report=build_live_readonly_plan(wallet,allowlist_path,rpc,client)
+            report=build_live_readonly_plan(
+                wallet,allowlist_path,rpc,client,
+                eth_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE)
         capital=report["plan"]["capital_units"]
         action=next_auto_action(db_path,policy=policy,
                                 observed_capital_units=capital,current_chain_id=chain)
@@ -75,6 +78,8 @@ def preflight(*, db_path: str, wallet: str, protected_wallet: str,
             "wallet":wallet,"chain_id":chain,"rpc_block":block,
             "capital_units":capital,"eth_balance_wei":eth_wei,
             "gas_price_wei":gas_price,
+            "executor_eth_reserve_wei":DEDICATED_EXECUTOR_ETH_RESERVE,
+            "legacy_eth_reserve_wei":ETH_RESERVE,
             "campaign_status":action["status"],
             "signing_key_accessed":False,"submitted":False,
         }
