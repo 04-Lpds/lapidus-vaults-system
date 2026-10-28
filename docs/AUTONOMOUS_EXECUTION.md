@@ -37,6 +37,21 @@ generation process separately before scheduling this option.
   history, GitHub, conversation, or logs. This environment-variable prototype
   is **not a hardened key-custody design**.
 
+## Signed Anvil rehearsal (required before live testing)
+
+After installing the optional automation dependency, start a local Base
+Anvil fork, then run:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m lapidus_vaults.operator signed-fork --fork-rpc http://127.0.0.1:8545 --usdc-holder <BASE_USDC_HOLDER> --vault <ALLOWLISTED_USDC_VAULT>
+```
+
+The tool creates a fresh disposable signing key for local transactions only,
+funds its actor through an impersonated **forked** USDC holder, and signs
+approval and deposit calls using the same EIP-1559 signer code. It validates
+production quote/consume and receipt checks. It never uses a real wallet
+private key or an external transaction endpoint.
+
 ## Dry/disabled entry point
 
 ```powershell
