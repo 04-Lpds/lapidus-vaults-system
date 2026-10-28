@@ -52,6 +52,24 @@ approval and deposit calls using the same EIP-1559 signer code. It validates
 production quote/consume and receipt checks. It never uses a real wallet
 private key or an external transaction endpoint.
 
+## Full automatic lifecycle Anvil test
+
+Run against the local Base fork after fetching this branch:
+
+```powershell
+.\.venv\Scripts\python.exe -m lapidus_vaults.operator auto-lifecycle-fork `
+  --fork-rpc http://127.0.0.1:8545 `
+  --usdc-holder 0x8685F85E3afcE79310658FB09d85BB98ecFc7EdE `
+  --vault 0x050ce30b927da55177a4914ec73480238bad56f0
+```
+
+Expected: AUTO_LIFECYCLE_FORK_PASSED, two signed approval/deposit
+transactions, an intermediate PENDING_NOT_FOUND without rebroadcast,
+subsequent receipt recovery, both journal states CONFIRMED, and campaign
+COMPLETED. The test creates a disposable wallet and SQLite file; its
+RPC writes pass only through the loopback-only ForkRPC transport. Restart
+simulation re-enters the real auto_once controller on separate calls.
+
 ## Dry/disabled entry point
 
 ```powershell
