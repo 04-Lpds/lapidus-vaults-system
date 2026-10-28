@@ -21,11 +21,12 @@ def main(argv=None) -> int:
         ("campaign-create", "Persist a read-only supervised rebalance campaign"),
         ("fork-rehearsal", "Run local Anvil campaign and receipt-bridge integration"),
         ("auto-fork", "Run an unattended campaign ONLY on a local Anvil Base fork"),
+        ("auto-once", "Experimental dedicated-wallet live executor; disabled unless explicitly enabled"),
     ):
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign
+    from .operations import create_campaign, auto_once
 
     runners = {
         "monitor": monitor_once.main,
@@ -33,6 +34,7 @@ def main(argv=None) -> int:
         "campaign-create": create_campaign.main,
         "fork-rehearsal": fork_campaign_rehearsal.main,
         "auto-fork": fork_campaign_rehearsal.main,
+        "auto-once": auto_once.main,
     }
     return int(runners[args.command](rest))
 
