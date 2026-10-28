@@ -18,7 +18,7 @@ import httpx
 
 from ..allocator import address_ok
 from ..client import MorphoClient
-from ..live_readonly_plan import build_live_readonly_plan
+from ..live_readonly_plan import build_live_readonly_plan, DEDICATED_EXECUTOR_ETH_RESERVE
 from ..rpc_verify import ReadOnlyRPC
 from ..wallet_plan import read_policy
 from ..live_deposit import DepositQuotes
@@ -178,7 +178,9 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
             # Also cover crashes after authorization/binding but before reserve.
             assert_no_orphaned_authorizations(db_path)
             with MorphoClient() as morpho:
-                report=build_live_readonly_plan(wallet, allowlist_path,rpc,morpho)
+                report=build_live_readonly_plan(
+                    wallet, allowlist_path,rpc,morpho,
+                    eth_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE)
             observed_units=report["plan"]["capital_units"]
             action=next_auto_action(db_path,policy=policy,
                                     observed_capital_units=observed_units,
