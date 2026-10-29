@@ -169,7 +169,18 @@ def main(argv=None):
         print("CANARY INTERRUPTED; inspect journal and receipts before resuming.")
         return 2
     except Exception as exc:
-        print("CANARY BLOCKED: "+type(exc).__name__+
+        # Do not expose arbitrary library errors: they may contain RPC credentials.
+        known={
+            "Insufficient ETH reserve":"ETH_RESERVE_INSUFFICIENT",
+            "Insufficient ETH for conservative gas budget":"GAS_BUDGET_INSUFFICIENT",
+            "Wallet capital outside unattended policy":"CAPITAL_POLICY_BLOCKED",
+            "Fresh transaction differs from campaign; replan required":"QUOTE_INTENT_MISMATCH",
+            "Canary payload changed":"CANARY_INTENT_MISMATCH",
+            "Dedicated signing key identity mismatch":"SIGNER_MISMATCH",
+            "Insufficient shares or invalid previewWithdraw":"WITHDRAWAL_CAPACITY_BLOCKED",
+        }
+        reason=known.get(str(exc),type(exc).__name__)
+        print("CANARY BLOCKED: "+reason+
               ". Inspect journal and receipts before restarting.",file=sys.stderr)
         return 1
 
