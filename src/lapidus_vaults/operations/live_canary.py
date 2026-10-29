@@ -64,7 +64,7 @@ def prepare(*,db_path,wallet,protected_wallet,allowlist,rpc_url,source,destinati
             raise ValueError("Insufficient source vault shares for 0.5 USDC")
         from ..live_withdraw import WithdrawalQuotes
         # Independently simulate withdrawal and check gas before journaling.
-        WithdrawalQuotes().quote(rpc,wallet=wallet,vault=source,
+        WithdrawalQuotes(min_gas_reserve_wei=200_000_000_000_000).quote(rpc,wallet=wallet,vault=source,
                                  approved_vaults=allowed,amount_units=AMOUNT)
         if rpc.eth_balance(wallet,block)<200_000_000_000_000:
             raise ValueError("Executor ETH reserve insufficient")
