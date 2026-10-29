@@ -21,7 +21,7 @@ from ..unsigned_candidates import UnsignedCandidate, WITHDRAW, APPROVE, DEPOSIT
 from ..wallet_plan import read_policy
 from .campaigns import create_campaign, read_campaign
 from .auto_once import execute_once, assert_no_orphaned_authorizations
-from .live_pilot import _state, _outstanding
+from .live_pilot import _state, _outstanding, _single_pilot
 
 AMOUNT=500_000
 MAX_TOTAL_CAPITAL=5_001_000
@@ -84,8 +84,6 @@ def prepare(*,db_path,wallet,protected_wallet,allowlist,rpc_url,source,destinati
 
 def run(*,db_path,wallet,protected_wallet,allowlist,rpc_url,private_key,campaign_id,
         execute_fn=execute_once,sleep_fn=time.sleep):
-    if Path(str(db_path)+".pilot.lock").exists():
-        raise RuntimeError("Live pilot must be stopped before canary")
     allowed=read_policy(allowlist).vault_addresses
     campaign=read_campaign(db_path,campaign_id)
     if campaign["state"]!="ACTIVE" or campaign["wallet"]!=wallet.lower():
@@ -160,10 +158,11 @@ def main(argv=None):
             print(json.dumps(report,indent=2))
             return 0
         # An explicit second invocation is required to submit real funds.
-        report=run(db_path=a.db,wallet=a.wallet,protected_wallet=a.protected_wallet,
-                   allowlist=a.allowlist,rpc_url=rpc,
-                   private_key=os.getenv("LVS_AUTO_PRIVATE_KEY"),
-                   campaign_id=a.campaign_id)
+        with _single_pilot(a.db):
+            report=run(db_path=a.db,wallet=a.wallet,protected_wallet=a.protected_wallet,
+                       allowlist=a.allowlist,rpc_url=rpc,
+                       private_key=os.getenv("LVS_AUTO_PRIVATE_KEY"),
+                       campaign_id=a.campaign_id)
         print(json.dumps(report,indent=2))
         return 0 if report["status"]=="CANARY_COMPLETED" else 2
     except KeyboardInterrupt:
