@@ -21,7 +21,7 @@ class WithdrawalQuotes(DepositQuotes):
         if rpc.call_address(vault,ASSET,block)!=BASE_USDC:
             raise ValueError("Underlying mismatch")
         eth=rpc.eth_balance(wallet,block)
-        if eth<MIN_GAS_RESERVE_WEI:
+        if eth<self.min_gas_reserve_wei:
             raise ValueError("Insufficient ETH reserve")
         shares=rpc.call_uint(vault,BALANCE_OF,block,_address_word(wallet))
         withdrawable=rpc.call_uint(vault,MAX_WITHDRAW,block,_address_word(wallet))
@@ -46,7 +46,7 @@ class WithdrawalQuotes(DepositQuotes):
             raise ValueError("Gas estimate outside policy")
         limit=min(700000,gas_estimate*13//10+10000)
         gas_price=rpc.gas_price_wei()
-        if not 0<gas_price<=100_000_000_000 or eth<MIN_GAS_RESERVE_WEI+3*limit*gas_price:
+        if not 0<gas_price<=100_000_000_000 or eth<self.min_gas_reserve_wei+3*limit*gas_price:
             raise ValueError("Insufficient ETH for conservative gas budget")
         import secrets,time
         quote_id=secrets.token_urlsafe(24)
