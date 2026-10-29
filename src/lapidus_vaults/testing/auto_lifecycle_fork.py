@@ -54,7 +54,7 @@ class _PendingOnce(DepositQuotes):
         }
 
 
-def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str = "profitable") -> dict:
+def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str = "profitable", destination: str | None = None) -> dict:
     if scenario not in {"profitable", "uneconomic", "tampered"}:
         raise ValueError("Unknown synthetic fork scenario")
     addr_word(holder)
@@ -64,6 +64,10 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         raise RuntimeError("Vault is not native Base USDC")
     if len(rpc.call("eth_getCode", [vault, "latest"])) < 10:
         raise RuntimeError("Vault bytecode unavailable")
+    if destination is not None and (destination not in VAULTS or destination == vault):
+        raise ValueError("Distinct allowlisted fork destination required")
+    if destination is not None and "0x" + format(rpc.uint(destination, ASSET), "040x") != BASE_USDC:
+        raise ValueError("Destination underlying must be native Base USDC")
     amount = 800_000
 
     # Reject bad synthetic proposals BEFORE funding any disposable wallet.
@@ -100,6 +104,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         return {
             "status": "FORK_SCENARIO_BLOCKED_NO_CAMPAIGN_TRANSACTIONS",
             "scenario": scenario, "admission": admission,
+            "execution_mode": "cross_vault" if destination is not None else "deposit",
             "campaign_created": False, "signed_transactions": [],
             "mainnet_broadcast": False,
             "note": "Rejected before fork wallet funding, signing or campaign creation.",
@@ -121,6 +126,22 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     finally:
         rpc.call("anvil_stopImpersonatingAccount", [holder])
 
+    if destination is not None:
+        # Bootstrap the SOURCE position on the fork only. This setup is not
+        # counted as an autonomous campaign send.
+        rpc.call("anvil_impersonateAccount", [wallet])
+        try:
+            rpc.transact(BASE_USDC, wallet,
+                APPROVE + addr_word(vault) + word(amount),
+                step="seed source vault approval")
+            rpc.transact(vault, wallet,
+                DEPOSIT + word(amount) + addr_word(wallet),
+                step="seed source vault position")
+        finally:
+            rpc.call("anvil_stopImpersonatingAccount", [wallet])
+        if rpc.balance(vault, wallet) <= 0:
+            raise RuntimeError("Source seeding minted no shares")
+
     # The same observed-portfolio candidate builder as the live keyless
     # controller now produces the signed fork campaign actions.
     from ..operations.observed_campaign import propose_candidates
@@ -128,12 +149,19 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         "chain_id": 8453, "wallet": wallet,
         "observed_block": int(rpc.call("eth_blockNumber", []), 16),
         "capital_units": amount, "wallet_usdc_units": rpc.balance(BASE_USDC, wallet),
-        "changes": [{"vault_address": vault, "current_units": 0,
-                     "target_units": amount, "delta_units": amount}],
+        "changes": ([{"vault_address": vault, "current_units": amount,
+                       "target_units": 0, "delta_units": -amount},
+                      {"vault_address": destination, "current_units": 0,
+                       "target_units": amount, "delta_units": amount}]
+                    if destination is not None else
+                    [{"vault_address": vault, "current_units": 0,
+                      "target_units": amount, "delta_units": amount}]),
     }}
     actions = propose_candidates(fork_observation, wallet=wallet,
-                                  approved_vaults=(vault,))
-    if [a.method for a in actions] != ["approve_intent", "deposit_intent"]:
+                                  approved_vaults=(vault, destination) if destination is not None else (vault,))
+    expected_methods = (["withdraw_intent", "approve_intent", "deposit_intent"]
+                        if destination is not None else ["approve_intent", "deposit_intent"])
+    if [a.method for a in actions] != expected_methods:
         raise RuntimeError("Fork proposal did not produce expected safe lifecycle")
 
     # Test journal is always isolated from operator's persistent DB.
@@ -155,7 +183,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     if scenario == "tampered":
         proposed[1]["data"] = DEPOSIT + word(amount + 1) + addr_word(wallet)
     admission = assess_admission(economics=economics, candidates=proposed,
-                                 wallet=wallet, approved_vaults=(vault,))
+                                 wallet=wallet, approved_vaults=(vault, destination) if destination is not None else (vault,))
     if admission["status"] != "ADMISSION_REVIEW_ONLY":
         if scenario == "profitable":
             raise RuntimeError("Profitable test scenario unexpectedly blocked")
@@ -192,8 +220,8 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         mark_submitted(db_path, campaign_id=kwargs["campaign_id"],
                        sequence=kwargs["sequence"], quote_id=kwargs["quote_id"],
                        tx_hash=signed["tx_hash"])
-        if len(sends) >= 2:
-            raise RuntimeError("Unexpected third send")
+        if len(sends) >= len(actions):
+            raise RuntimeError("Unexpected additional send")
         _send(rpc, signed["raw"], signed["tx_hash"])
         sends.append(signed["tx_hash"])
         return {"state": "SUBMITTED", "tx_hash": signed["tx_hash"]}
@@ -204,7 +232,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     def step():
         return auto_once.execute_once(
             db_path=db_path, wallet=wallet,
-            protected_wallet=holder.lower(), approved_vaults=(vault,),
+            protected_wallet=holder.lower(), approved_vaults=(vault, destination) if destination is not None else (vault,),
             allowlist_path="local-only-allowlist",
             rpc_url="https://local-only.invalid",
             private_key=secret, max_capital_units=10_000_000,
@@ -222,43 +250,41 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     for p in patches:
         p.start()
     try:
-        # Simulated scheduler invocation 1: real signed approve on Anvil.
-        first = step()
-        if first.get("state") != "SUBMITTED" or len(sends) != 1:
-            raise RuntimeError("First autonomous step was not submitted")
-
-        # Restart with an unindexed receipt: never resend.
-        with patch.object(auto_once, "DepositQuotes", _PendingOnce):
-            pending = step()
-        if pending["status"] != "PENDING_NOT_FOUND" or len(sends) != 1:
-            raise RuntimeError("Pending receipt incorrectly triggered resend")
-
-        # Next restart recovers approval from SQLite.
-        recovered_first = step()
-        if recovered_first["status"] != "RECEIPT_AND_BLOCK_MATCH":
-            raise RuntimeError("Signed approval recovery failed")
-
-        # Next invocation submits signed deposit.
-        second = step()
-        if second.get("state") != "SUBMITTED" or len(sends) != 2:
-            raise RuntimeError("Second autonomous step was not submitted")
-
-        # Recovery confirms final deposit and completes campaign.
-        recovered_second = step()
-        if recovered_second["status"] != "RECEIPT_AND_BLOCK_MATCH":
-            raise RuntimeError("Signed deposit recovery failed")
+        from ..operations.campaigns import read_campaign
+        observations = []
+        for i in range(len(actions)):
+            submitted = step()
+            if submitted.get("state") != "SUBMITTED" or len(sends) != i + 1:
+                raise RuntimeError(f"Autonomous step {i + 1} not submitted")
+            observations.append(submitted)
+            if i == 0:
+                # Force one delayed receipt lookup, ensure no blind resend.
+                pending_class = WithdrawalQuotes if destination is not None else DepositQuotes
+                with patch.object(auto_once, pending_class.__module__.split(".")[-1] == "live_withdraw" and "WithdrawalQuotes" or "DepositQuotes", _PendingOnce):
+                    pending = step()
+                if pending.get("status") != "PENDING_NOT_FOUND" or len(sends) != 1:
+                    raise RuntimeError("Unindexed receipt triggered a duplicate send")
+            recovered = step()
+            if recovered.get("status") != "RECEIPT_AND_BLOCK_MATCH":
+                raise RuntimeError(f"Receipt recovery failed on step {i + 1}")
+            observations.append(recovered)
         completed = read_campaign(db_path, campaign_id)
         if completed["state"] != "COMPLETED":
-            raise RuntimeError("Automatic campaign failed to complete")
-
+            raise RuntimeError("Campaign failed to complete")
         after = step()
-        if after["status"] != "NO_ACTIVE_CAMPAIGN" or len(sends) != 2:
-            raise RuntimeError("Completed campaign resubmitted an action")
+        if after.get("status") != "NO_ACTIVE_CAMPAIGN" or len(sends) != len(actions):
+            raise RuntimeError("Completed campaign attempted another send")
         journal = current(db_path, campaign_id)
-        if [e["state"] for e in journal] != ["CONFIRMED", "CONFIRMED"]:
-            raise RuntimeError("Autonomous SQLite journal is incomplete")
-        if rpc.balance(BASE_USDC, wallet) != 0 or rpc.balance(vault, wallet) <= 0:
-            raise RuntimeError("Final fork wallet balances mismatch")
+        if [e["state"] for e in journal] != ["CONFIRMED"] * len(actions):
+            raise RuntimeError("Journal does not match confirmed campaign")
+        if destination is None:
+            if rpc.balance(BASE_USDC, wallet) != 0 or rpc.balance(vault, wallet) <= 0:
+                raise RuntimeError("Final fork balances mismatch")
+        else:
+            if (rpc.balance(BASE_USDC, wallet) != 0 or
+                rpc.balance(destination, wallet) <= 0 or
+                rpc.balance(vault, wallet) != 0):
+                raise RuntimeError("Cross-vault balances failed reconciliation")
 
         return {
             "status": "AUTO_LIFECYCLE_FORK_PASSED",
@@ -287,11 +313,12 @@ def main(argv=None):
     parser.add_argument("--fork-rpc", default="http://127.0.0.1:8545")
     parser.add_argument("--usdc-holder", required=True)
     parser.add_argument("--vault", required=True, choices=VAULTS)
+    parser.add_argument("--destination", choices=VAULTS, help="Optional destination vault for unattended cross-vault lifecycle")
     parser.add_argument("--scenario", choices=("profitable", "uneconomic", "tampered"), default="profitable")
     args = parser.parse_args(argv)
     try:
         with ForkRPC(args.fork_rpc) as rpc:
-            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault, scenario=args.scenario)
+            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault, scenario=args.scenario, destination=args.destination)
         print(json.dumps(report, indent=2))
         print("LOCAL ANVIL ONLY. No mainnet signing or broadcast.")
         return 0
