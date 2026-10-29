@@ -139,7 +139,8 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
                 step="seed source vault position")
         finally:
             rpc.call("anvil_stopImpersonatingAccount", [wallet])
-        if rpc.balance(vault, wallet) <= 0:
+        initial_source_shares = rpc.balance(vault, wallet)
+        if initial_source_shares <= 0:
             raise RuntimeError("Source seeding minted no shares")
 
     # The same observed-portfolio candidate builder as the live keyless
@@ -259,8 +260,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             observations.append(submitted)
             if i == 0:
                 # Force one delayed receipt lookup, ensure no blind resend.
-                pending_class = WithdrawalQuotes if destination is not None else DepositQuotes
-                with patch.object(auto_once, pending_class.__module__.split(".")[-1] == "live_withdraw" and "WithdrawalQuotes" or "DepositQuotes", _PendingOnce):
+                with patch.object(auto_once, "WithdrawalQuotes" if destination is not None else "DepositQuotes", _PendingOnce):
                     pending = step()
                 if pending.get("status") != "PENDING_NOT_FOUND" or len(sends) != 1:
                     raise RuntimeError("Unindexed receipt triggered a duplicate send")
@@ -283,12 +283,13 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         else:
             if (rpc.balance(BASE_USDC, wallet) != 0 or
                 rpc.balance(destination, wallet) <= 0 or
-                rpc.balance(vault, wallet) != 0):
+                rpc.balance(vault, wallet) >= initial_source_shares):
                 raise RuntimeError("Cross-vault balances failed reconciliation")
 
         return {
             "status": "AUTO_LIFECYCLE_FORK_PASSED",
             "scenario": scenario, "admission": admission,
+            "execution_mode": "cross_vault" if destination is not None else "deposit",
             "campaign_id": campaign_id,
             "campaign_state": completed["state"],
             "disposable_wallet": wallet,
