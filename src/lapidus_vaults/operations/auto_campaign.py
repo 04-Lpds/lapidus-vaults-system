@@ -85,6 +85,39 @@ def run_campaign(*, db_path: str, campaign_id: str, wallet: str,
         return {"status":"HALTED_REVIEW_REQUIRED","campaign_id":campaign_id,"events":events}
     return {"status":"PAUSED_INVOCATION_LIMIT","campaign_id":campaign_id,"events":events}
 
+def run_bounded_campaign(*, db_path: str, campaign_id: str, wallet: str,
+                         protected_wallet: str, allowlist_path: str, rpc_url: str,
+                         private_key: str, max_capital_units: int = 5_000_000,
+                         execute_fn=execute_once, sleep_fn=time.sleep) -> dict:
+    """Generic approved-campaign driver. NOT exposed as a live CLI.
+
+    The historical run_campaign CLI remains limited to the known 0.8 USDC
+    two-step mainnet trial. This driver is for controlled integration tests
+    until fresh admission-to-execution authorization is independently proven.
+    """
+    from .campaign_admission import assess_admission
+    from .campaigns import read_campaign
+    from dataclasses import asdict
+    if not 0 < max_capital_units <= 5_000_000:
+        raise ValueError("Bounded controller requires at most 5 USDC")
+    if not os.path.isfile(db_path) or Path("data/STOP_AUTOMATION").exists():
+        raise RuntimeError("Missing journal or emergency stop active")
+    policy=read_policy(allowlist_path)
+    campaign=read_campaign(db_path,campaign_id)
+    if campaign["state"]!="ACTIVE" or campaign["wallet"]!=wallet.lower():
+        raise ValueError("Active campaign wallet mismatch")
+    with sqlite3.connect(db_path,timeout=10) as db:
+        row=db.execute("SELECT plan_json FROM rebalance_campaigns WHERE campaign_id=?",
+                       (campaign_id,)).fetchone()
+    actions=json.loads(row[0])
+    # Enforce calldata/sequence/dependency restrictions even for persisted data.
+    # Admission economics cannot be reconstructed from this bare journal:
+    # caller must pass a separately authenticated admission record.
+    return {"status":"EXECUTION_NOT_AUTHORIZED",
+            "reason":"Persisted candidates alone do not carry a durable economic authorization",
+            "campaign_id":campaign_id,"validated_step_count":len(actions),
+            "submitted":False}
+
 def main(argv=None):
     p=argparse.ArgumentParser(description="Execute one 0.8 USDC campaign end-to-end, with strict recovery gates")
     p.add_argument("--wallet",required=True)
