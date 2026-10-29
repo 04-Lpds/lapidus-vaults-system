@@ -80,7 +80,7 @@ def _recover(db_path: str, campaign_id: str, entries: list[dict], rpc: ReadOnlyR
         raise RuntimeError("Submission outcome unknown; cannot automatically retry")
     quote_id=entry["quote_id"]
     saved=_load_consumed(db_path,quote_id)
-    engine=WithdrawalQuotes() if saved["stage"]=="withdraw" else DepositQuotes()
+    engine=WithdrawalQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE) if saved["stage"]=="withdraw" else DepositQuotes()
     engine.consumed[quote_id]=saved
     verified=engine.check_receipt(rpc,quote_id,entry["tx_hash"])
     # Preserve independent receipt evidence through the actual bridge.
