@@ -69,7 +69,8 @@ def controller_once(*,db_path:str,wallet:str,allowlist:str,rpc_url:str,
             created=create_campaign(db_path,campaign_id,proposed)
             result.update({"status":"CAMPAIGN_CREATED_REVIEW_ONLY",
                 "campaign_created":True,"campaign_id":created["campaign_id"],
-                "campaign_state":created["state"],"steps":len(created["steps"])})
+                "campaign_state":created["state"],"steps":len(created["steps"]),
+                "economic_evidence":economics})
             return result
 
 def main(argv=None):
