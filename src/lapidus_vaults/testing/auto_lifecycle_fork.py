@@ -113,9 +113,10 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         if scenario == "profitable":
             raise RuntimeError("Profitable test scenario unexpectedly blocked")
         return {
-            "status": "FORK_SCENARIO_BLOCKED_NO_TRANSACTIONS",
+            "status": "FORK_SCENARIO_BLOCKED_NO_CAMPAIGN_TRANSACTIONS",
             "scenario": scenario, "admission": admission,
             "campaign_created": False, "signed_transactions": [],
+            "note": "Fork funding setup occurred before admission; no campaign actions were submitted.",
             "mainnet_broadcast": False,
         }
     if scenario != "profitable":
