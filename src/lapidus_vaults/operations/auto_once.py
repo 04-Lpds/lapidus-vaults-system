@@ -192,7 +192,7 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
             nonce_pending=read_nonce(rpc_url,policy.wallet,"pending")
             if nonce_latest!=nonce_pending:
                 raise RuntimeError("Dedicated wallet has other pending transactions")
-            deposits, withdrawals = DepositQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE), WithdrawalQuotes()
+            deposits, withdrawals = DepositQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE), WithdrawalQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE)
             quote=quote_next_campaign_action(
                 db_path,wallet=policy.wallet,approved_vaults=approved_vaults,
                 rpc=rpc,deposits=deposits,withdrawals=withdrawals)
