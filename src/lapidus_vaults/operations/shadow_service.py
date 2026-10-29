@@ -22,12 +22,15 @@ def service(*,db_path:str,wallet:str,allowlist:str,rpc_url:str,
             eth_usd:Decimal,interval_seconds:int=900,max_cycles:int=96,
             failure_limit:int=3,cycle_fn=run_cycle,sleep_fn=time.sleep)->dict:
     if not address_ok(wallet) or not rpc_url.startswith("https://"):
-        raise ValueError("Invalid wallet or HTTPS Base RPC")
+        raise ValueError("INVALID_WALLET_OR_RPC_CONFIG")
     if not 60<=interval_seconds<=86400 or not 1<=max_cycles<=672:
-        raise ValueError("Invalid monitoring schedule")
+        raise ValueError("INVALID_MONITORING_SCHEDULE")
     if not 1<=failure_limit<=10 or not eth_usd.is_finite() or not Decimal(100)<=eth_usd<=Decimal(100000):
-        raise ValueError("Invalid monitoring policy")
-    read_policy(allowlist)
+        raise ValueError("INVALID_MONITORING_POLICY")
+    try:
+        read_policy(allowlist)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        raise ValueError("INVALID_ALLOWLIST") from exc
     target=Path(db_path)
     if target.exists() and not target.is_file():
         raise ValueError("Invalid monitoring journal")
@@ -78,7 +81,12 @@ def main(argv=None):
         print("READ-ONLY MONITOR INTERRUPTED. No transactions sent.")
         return 0
     except Exception as exc:
-        print("SHADOW SERVICE BLOCKED: "+type(exc).__name__,file=sys.stderr)
+        reason = str(exc) if isinstance(exc, ValueError) and str(exc) in {
+            "INVALID_WALLET_OR_RPC_CONFIG", "INVALID_MONITORING_SCHEDULE",
+            "INVALID_MONITORING_POLICY", "INVALID_ALLOWLIST",
+            "Invalid monitoring journal",
+        } else type(exc).__name__
+        print("SHADOW SERVICE BLOCKED: "+reason,file=sys.stderr)
         return 1
 
 if __name__=="__main__":
