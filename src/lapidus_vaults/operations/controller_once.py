@@ -50,8 +50,14 @@ def controller_once(*,db_path:str,wallet:str,allowlist:str,rpc_url:str,
                     "campaign_created":False}
             if economics["decision"]!="REBALANCE_REVIEW_ONLY":
                 return result
-            proposed=propose_candidates(report,wallet=wallet,
-                  approved_vaults=policy.vault_addresses)
+            try:
+                proposed=propose_candidates(report,wallet=wallet,
+                      approved_vaults=policy.vault_addresses)
+            except ValueError:
+                # An economically appealing but oversized movement is not
+                # authority to relax a hard per-transaction cap.
+                result["status"]="CANDIDATE_POLICY_BLOCKED"
+                return result
             admission=assess_admission(economics=economics,
                 candidates=[asdict(c) for c in proposed],wallet=wallet,
                 approved_vaults=policy.vault_addresses)
