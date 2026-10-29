@@ -95,3 +95,13 @@ def test_persistent_economic_authorization_is_exact_and_expires(tmp_path):
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE pilot_authorizations SET economics_json='{}'")
     assert not _evidence_valid(db,"pilot-test",W,(V,),require_fresh=False)
+
+def test_bad_signer_input_has_safe_diagnostic(tmp_path):
+    db=str(tmp_path/"pilot.sqlite3")
+    sqlite3.connect(db).close()
+    with patch("lapidus_vaults.operations.live_pilot.read_policy") as policy:
+        policy.return_value.vault_addresses=(V,)
+        with pytest.raises(ValueError,match="SIGNER_KEY_INVALID_FORMAT"):
+            cycle(db_path=db,wallet=W,protected_wallet=P,allowlist="ignored",
+                  rpc_url="https://example.invalid",eth_usd=Decimal("3000"),
+                  execute_live=True,private_key="not a private key")
