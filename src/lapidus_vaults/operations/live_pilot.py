@@ -112,7 +112,8 @@ def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
     assert_no_orphaned_authorizations(db_path)
     campaign_id="pilot-"+datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")+"-"+uuid4().hex[:8]
     decision=controller_fn(db_path=db_path,wallet=wallet.lower(),
-        allowlist=allowlist,rpc_url=rpc_url,eth_usd=eth_usd,campaign_id=campaign_id)
+        allowlist=allowlist,rpc_url=rpc_url,eth_usd=eth_usd,campaign_id=campaign_id,
+        managed_capital_cap_units=CAPITAL_CAP)
     if decision.get("status")!="CAMPAIGN_CREATED_REVIEW_ONLY":
         return {"status":"NO_ACTION","decision":decision,"submitted":False}
     # Review-only admission is NOT enough by itself: check the persisted
