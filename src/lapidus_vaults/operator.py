@@ -21,6 +21,7 @@ def main(argv=None) -> int:
         ("shadow-watch", "Monitor and journal read-only live decisions every 15 minutes"),
         ("scenario-admission", "Run offline synthetic rebalancing admission scenarios"),
         ("scenario-campaign", "Rehearse admission into isolated SQLite campaigns"),
+        ("controller-once", "Keyless live observation to review-only campaign"),
         ("console", "Start the local supervised MetaMask console"),
         ("campaign-create", "Persist a read-only supervised rebalance campaign"),
         ("fork-rehearsal", "Run local Anvil campaign and receipt-bridge integration"),
@@ -35,7 +36,7 @@ def main(argv=None) -> int:
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal
+    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once
     from .testing import signed_fork_rehearsal, auto_lifecycle_fork
 
     runners = {
@@ -44,6 +45,7 @@ def main(argv=None) -> int:
         "shadow-watch": shadow_watch.main,
         "scenario-admission": synthetic_admission.main,
         "scenario-campaign": synthetic_campaign_rehearsal.main,
+        "controller-once": controller_once.main,
         "console": local_console.main,
         "campaign-create": create_campaign.main,
         "fork-rehearsal": fork_campaign_rehearsal.main,
