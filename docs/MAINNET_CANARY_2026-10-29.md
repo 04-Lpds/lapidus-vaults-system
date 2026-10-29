@@ -43,11 +43,27 @@ inspectable.
   validated strategy performance.
 - Comprehensive failure recovery, code audit, or protection against all Morpho
   / Base / RPC / signer failure modes.
-- The *post-campaign* portfolio snapshot is **not yet recorded here**. Run a
-  fresh read-only observation against the dedicated wallet and attach its
-  observation ID, block and measured per-vault positions.
+- A read-only post-campaign snapshot is recorded below; it is not a standalone before/after audit.
 
-## Post-campaign check (operator-run, read-only)
+## Post-campaign observation (read-only)
+
+Operator-run `monitor` at Base block **53263271** (observation ID **1**) returned:
+
+| Position | USDC base units | USDC |
+| --- | ---: | ---: |
+| Wallet idle USDC | 4200000 | 4.200000 |
+| Gauntlet source vault | 300212 | 0.300212 |
+| Juno destination vault | 500000 | 0.500000 |
+| **Total** | **5000212** | **5.000212** |
+
+The live monitor reported `REBALANCE_REVIEW`, maximum deviation
+`3399` bps versus threshold `500` bps, gross transaction assets
+`3199956` base units, and `action_count=2`. This is a drift signal;
+it does **not** establish net-positive economics or authorize another trade.
+The destination position is consistent with the canary's confirmed receipts,
+but the snapshot alone does not provide a before/after balance comparison.
+
+## Repeat post-campaign check (operator-run, read-only)
 
 With `BASE_RPC_URL` configured, from the repo root:
 
