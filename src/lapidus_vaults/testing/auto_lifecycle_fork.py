@@ -68,6 +68,45 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     if rpc.balance(BASE_USDC, holder) < amount:
         raise RuntimeError("Fork holder lacks 0.8 USDC")
 
+    # Reject bad synthetic proposals BEFORE funding any disposable wallet.
+    # This also ensures repeated negative scenarios cannot consume fork USDC.
+    from dataclasses import asdict
+    from ..operations.campaign_admission import assess_admission
+    from ..rpc_verify import _address_word, _word
+    from ..unsigned_candidates import APPROVE, DEPOSIT
+    # A test-only wallet address is enough for admission. Never read a private key
+    # or submit a transaction for a blocked scenario.
+    if scenario != "profitable":
+        mock_wallet = "0x" + "1" * 40
+        mock_candidates = (
+            UnsignedCandidate(1, (), "approve_intent", 8453,
+                mock_wallet, BASE_USDC, 0,
+                APPROVE + _address_word(vault) + _word(amount), amount),
+            UnsignedCandidate(2, (1,), "deposit_intent", 8453,
+                mock_wallet, vault, 0,
+                DEPOSIT + _word(amount + (1 if scenario == "tampered" else 0)) + _address_word(mock_wallet), amount),
+        )
+        mock_economics = {
+            "decision": "HOLD_ESTIMATED_FEES_EXCEED_BENEFIT" if scenario == "uneconomic"
+                       else "REBALANCE_REVIEW_ONLY",
+            "submitted": False, "capital_units": 5_000_000,
+            "estimated_fee_usd": "0.50" if scenario == "uneconomic" else "0.001",
+            "projected_historical_rate_yield_delta_usd": "0.10",
+            "eth_usd_assumption": "3000",
+        }
+        admission = assess_admission(economics=mock_economics,
+            candidates=[asdict(x) for x in mock_candidates],
+            wallet=mock_wallet, approved_vaults=(vault,))
+        if admission["status"] != "ADMISSION_BLOCKED":
+            raise RuntimeError("Unsafe synthetic scenario unexpectedly admitted")
+        return {
+            "status": "FORK_SCENARIO_BLOCKED_NO_CAMPAIGN_TRANSACTIONS",
+            "scenario": scenario, "admission": admission,
+            "campaign_created": False, "signed_transactions": [],
+            "mainnet_broadcast": False,
+            "note": "Rejected before fork wallet funding, signing or campaign creation.",
+        }
+
     disposable = Account.create()
     wallet = disposable.address.lower()
     secret = "0x" + bytes(disposable.key).hex()
