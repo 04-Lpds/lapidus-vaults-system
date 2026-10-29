@@ -6,7 +6,8 @@ Journal recovery always takes precedence over generating any new campaign.
 """
 from __future__ import annotations
 import argparse
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import json
 import hashlib
@@ -59,22 +60,58 @@ def _digest(db_path, campaign_id, wallet, vaults):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _authorized(db_path, campaign_id, wallet, vaults):
+def _evidence_valid(db_path, campaign_id, wallet, vaults, *, require_fresh):
+    from .campaign_admission import assess_admission
     with sqlite3.connect(db_path,timeout=10) as db:
         table=db.execute("SELECT name FROM sqlite_master WHERE name='pilot_authorizations'").fetchone()
         if table is None:
             return False
-        row=db.execute("SELECT digest FROM pilot_authorizations WHERE campaign_id=?",
-                       (campaign_id,)).fetchone()
-    return row is not None and row[0]==_digest(db_path,campaign_id,wallet,vaults)
+        row=db.execute("""SELECT digest,economics_json,authorized_at
+            FROM pilot_authorizations WHERE campaign_id=?""",(campaign_id,)).fetchone()
+    if row is None or row[0]!=_digest(db_path,campaign_id,wallet,vaults):
+        return False
+    try:
+        evidence=json.loads(row[1])
+        at=datetime.fromisoformat(row[2])
+        if at.tzinfo is None or at>datetime.now(timezone.utc):
+            return False
+        if require_fresh and datetime.now(timezone.utc)-at>timedelta(minutes=30):
+            return False
+        with sqlite3.connect(db_path,timeout=10) as db:
+            saved=db.execute("SELECT plan_json FROM rebalance_campaigns WHERE campaign_id=?",
+                             (campaign_id,)).fetchone()
+        if saved is None:
+            return False
+        verdict=assess_admission(economics=evidence,candidates=json.loads(saved[0]),
+                                 wallet=wallet.lower(),approved_vaults=vaults)
+        return verdict["status"]=="ADMISSION_REVIEW_ONLY"
+    except (ValueError,KeyError,TypeError,sqlite3.Error):
+        return False
 
 
-def _authorize(db_path,campaign_id,wallet,vaults):
+def _authorize(db_path,campaign_id,wallet,vaults,economics):
     digest=_digest(db_path,campaign_id,wallet,vaults)
     with sqlite3.connect(db_path,timeout=10) as db:
-        db.execute("CREATE TABLE IF NOT EXISTS pilot_authorizations (campaign_id TEXT PRIMARY KEY, digest TEXT NOT NULL)")
-        db.execute("INSERT INTO pilot_authorizations VALUES (?,?)",(campaign_id,digest))
+        db.execute("""CREATE TABLE IF NOT EXISTS pilot_authorizations
+            (campaign_id TEXT PRIMARY KEY, digest TEXT NOT NULL,
+             economics_json TEXT NOT NULL, authorized_at TEXT NOT NULL)""")
+        db.execute("INSERT INTO pilot_authorizations VALUES (?,?,?,?)",
+            (campaign_id,digest,json.dumps(economics,sort_keys=True),
+             datetime.now(timezone.utc).isoformat()))
         db.commit()
+
+
+@contextmanager
+def _single_pilot(db_path):
+    # Independent of the per-transaction auto.lock (used inside execute_once).
+    lock=Path(str(db_path)+".pilot.lock")
+    fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+    try:
+        with os.fdopen(fd,"w") as handle:
+            handle.write("Pilot active; verify process before removing stale lock.\\n")
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
@@ -101,8 +138,18 @@ def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
     if outstanding or active:
         if not execute_live:
             return {"status":"ACTIVE_OR_PENDING_REVIEW_ONLY","submitted":False}
-        if not active or not _authorized(db_path,active[0],wallet,policy.vault_addresses):
+        if not active or not _evidence_valid(db_path,active[0],wallet,policy.vault_addresses,
+                                              require_fresh=not outstanding):
             return {"status":"UNAUTHORIZED_EXISTING_CAMPAIGN","submitted":False}
+        # An unresolved broadcast is receipt-only recovery. A fresh economic
+        # authorization is mandatory before signing subsequent campaign steps.
+        if outstanding:
+            event=execute_fn(db_path=db_path,wallet=wallet.lower(),
+                protected_wallet=protected_wallet,approved_vaults=policy.vault_addresses,
+                allowlist_path=allowlist,rpc_url=rpc_url,private_key=private_key,
+                max_capital_units=CAPITAL_CAP+CAPITAL_ACCOUNTING_TOLERANCE)
+            return {"status":"RECOVERY_ONLY","event":event,
+                    "submitted":event.get("state")=="SUBMITTED"}
         event=execute_fn(db_path=db_path,wallet=wallet.lower(),
             protected_wallet=protected_wallet,approved_vaults=policy.vault_addresses,
             allowlist_path=allowlist,rpc_url=rpc_url,private_key=private_key,
@@ -138,7 +185,7 @@ def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
     if not execute_live:
         return {"status":"CAMPAIGN_CREATED_NOT_AUTHORIZED","campaign_id":campaign_id,
                 "submitted":False,"admission":verdict}
-    _authorize(db_path,campaign_id,wallet,policy.vault_addresses)
+    _authorize(db_path,campaign_id,wallet,policy.vault_addresses,economics)
     # One transaction at most per cycle; recovery/confirmation unlocks later
     # steps on subsequent cycles, never within an unchecked signing loop.
     event=execute_fn(db_path=db_path,wallet=wallet.lower(),
@@ -168,24 +215,8 @@ def main(argv=None):
             raise ValueError("Invalid ETH USD assumption")
         rpc_url=os.environ.get("BASE_RPC_URL","")
         private_key=os.environ.get("LVS_AUTO_PRIVATE_KEY") if a.execute_live else None
-        for index in range(a.max_cycles):
-            result=cycle(db_path=a.db,wallet=a.wallet,protected_wallet=a.protected_wallet,
-                 allowlist=a.allowlist,rpc_url=rpc_url,eth_usd=usd,
-                 execute_live=a.execute_live,private_key=private_key)
-            print(json.dumps({"cycle":index+1,**result},default=str),flush=True)
-            if result.get("status")=="STOPPED_BY_OPERATOR":
-                return 0
-            # An unexpected state or a review-required execution must halt.
-            event=result.get("event",{})
-            permitted={"SUBMITTED","RECEIPT_AND_BLOCK_MATCH","NO_ACTIVE_CAMPAIGN",
-                "AUTO_POLICY_PASSED_AWAITING_SECURE_SIGNER","PENDING_NOT_FOUND","PENDING_MATCHED_INPUT"}
-            if event and event.get("status",event.get("state")) not in permitted:
-                return 2
-            if result["status"] in {"CAPITAL_CAP_BLOCKED","ADMISSION_BLOCKED","UNAUTHORIZED_EXISTING_CAMPAIGN"}:
-                return 2
-            if index+1<a.max_cycles:
-                time.sleep(a.interval_seconds)
-        return 0
+        with _single_pilot(a.db):
+            return _run_cycles(a,usd,rpc_url,private_key)
     except KeyboardInterrupt:
         print("PILOT INTERRUPTED. Confirm pending transaction status before restart.")
         return 0
@@ -193,6 +224,28 @@ def main(argv=None):
         print("PILOT HALTED: "+type(exc).__name__+
               ". Inspect executor journal and on-chain receipts before restart.",file=sys.stderr)
         return 1
+
+
+def _run_cycles(a,usd,rpc_url,private_key):
+    for index in range(a.max_cycles):
+        result=cycle(db_path=a.db,wallet=a.wallet,protected_wallet=a.protected_wallet,
+                     allowlist=a.allowlist,rpc_url=rpc_url,eth_usd=usd,
+                     execute_live=a.execute_live,private_key=private_key)
+        print(json.dumps({"cycle":index+1,**result},default=str),flush=True)
+        if result.get("status")=="STOPPED_BY_OPERATOR":
+            return 0
+        event=result.get("event",{})
+        permitted={"SUBMITTED","RECEIPT_AND_BLOCK_MATCH","NO_ACTIVE_CAMPAIGN",
+                   "PENDING_NOT_FOUND","PENDING_MATCHED_INPUT"}
+        if event and event.get("status",event.get("state")) not in permitted:
+            return 2
+        if result["status"] in {"CAPITAL_CAP_BLOCKED","ADMISSION_BLOCKED",
+                                "UNAUTHORIZED_EXISTING_CAMPAIGN"}:
+            return 2
+        if index+1<a.max_cycles:
+            time.sleep(a.interval_seconds)
+    return 0
+
 
 if __name__=="__main__":
     raise SystemExit(main())
