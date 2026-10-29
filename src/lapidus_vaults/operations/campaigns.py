@@ -4,6 +4,7 @@ No signing, broadcasting, or transaction authorization. The campaign snapshot
 is immutable; progress is recorded against explicitly identified plan steps.
 """
 from __future__ import annotations
+from contextlib import closing
 from dataclasses import asdict
 import json
 import sqlite3
@@ -50,7 +51,7 @@ def create_campaign(db_path: str, campaign_id: str, candidates: tuple[UnsignedCa
         raise ValueError("Base only")
     supervise_candidates(candidates,{})
     plan_json=json.dumps([asdict(c) for c in candidates],sort_keys=True)
-    with sqlite3.connect(db_path,timeout=10) as db:
+    with closing(sqlite3.connect(db_path,timeout=10)) as db, db:
         db.execute("BEGIN IMMEDIATE")
         _init(db)
         active=db.execute("SELECT campaign_id FROM rebalance_campaigns WHERE state='ACTIVE'").fetchone()
@@ -61,7 +62,7 @@ def create_campaign(db_path: str, campaign_id: str, candidates: tuple[UnsignedCa
     return read_campaign(db_path,campaign_id)
 
 def read_campaign(db_path: str, campaign_id: str) -> dict:
-    with sqlite3.connect(db_path,timeout=10) as db:
+    with closing(sqlite3.connect(db_path,timeout=10)) as db, db:
         _init(db)
         row=db.execute("SELECT wallet,plan_json,state FROM rebalance_campaigns WHERE campaign_id=?",
                        (campaign_id,)).fetchone()
@@ -94,7 +95,7 @@ def record_receipt_status(db_path: str, campaign_id: str, sequence: int,
         int(tx_hash[2:],16)
     except ValueError as exc:
         raise ValueError("Invalid transaction hash") from exc
-    with sqlite3.connect(db_path,timeout=10) as db:
+    with closing(sqlite3.connect(db_path,timeout=10)) as db, db:
         db.execute("BEGIN IMMEDIATE")
         _init(db)
         row=db.execute("SELECT plan_json,state FROM rebalance_campaigns WHERE campaign_id=?",
@@ -127,7 +128,7 @@ def record_receipt_status(db_path: str, campaign_id: str, sequence: int,
 
 def halt_campaign(db_path: str, campaign_id: str) -> None:
     """Administrative stop only; does not cancel transactions already submitted."""
-    with sqlite3.connect(db_path,timeout=10) as db:
+    with closing(sqlite3.connect(db_path,timeout=10)) as db, db:
         db.execute("BEGIN IMMEDIATE")
         _init(db)
         changed=db.execute("UPDATE rebalance_campaigns SET state='HALTED' WHERE campaign_id=? AND state='ACTIVE'",
