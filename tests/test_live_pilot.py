@@ -57,3 +57,17 @@ def test_existing_campaign_not_implicitly_authorized(tmp_path):
                 controller_fn=lambda **kw: pytest.fail("Must not create campaign"),
                 execute_fn=lambda **kw: pytest.fail("Must never sign unauthorized campaign"))
     assert result["status"]=="UNAUTHORIZED_EXISTING_CAMPAIGN"
+
+def test_managed_capital_excludes_dust_without_investing_it():
+    from lapidus_vaults.wallet_plan import Policy, WalletSnapshot, VaultHolding, build_rebalance
+    from datetime import datetime, timezone
+    policy=Policy((V,),Decimal("0.20"),Decimal("0.40"))
+    snap=WalletSnapshot(W,8453,123,5_000_202,
+                        (VaultHolding(V,0,0,123,1,1),),
+                        datetime.now(timezone.utc).isoformat())
+    preview=build_rebalance(snap,policy,managed_capital_cap_units=5_000_000)
+    assert preview.capital_units == 5_000_000
+    assert preview.changes[0].target_units == 2_000_000
+    assert preview.target_idle_units == 3_000_202
+    with pytest.raises(ValueError,match="strict cap"):
+        build_rebalance(snap,policy,managed_capital_cap_units=4_000_000)
