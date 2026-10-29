@@ -71,3 +71,27 @@ def test_managed_capital_excludes_dust_without_investing_it():
     assert preview.target_idle_units == 3_000_202
     with pytest.raises(ValueError,match="strict cap"):
         build_rebalance(snap,policy,managed_capital_cap_units=4_000_000)
+
+def test_persistent_economic_authorization_is_exact_and_expires(tmp_path):
+    from lapidus_vaults.operations.live_pilot import _authorize, _evidence_valid
+    from lapidus_vaults.unsigned_candidates import UnsignedCandidate, APPROVE
+    from lapidus_vaults.rpc_verify import _address_word, _word
+    from lapidus_vaults.allocator import BASE_USDC
+    from lapidus_vaults.operations.campaigns import create_campaign
+    db=str(tmp_path/"auth.sqlite3")
+    a=UnsignedCandidate(1,(),"approve_intent",8453,W,BASE_USDC,0,
+                        APPROVE+_address_word(V)+_word(500000),500000)
+    create_campaign(db,"pilot-test",(a,))
+    e={"decision":"REBALANCE_REVIEW_ONLY","submitted":False,
+       "capital_units":5_000_000,"estimated_fee_usd":"0.001",
+       "projected_historical_rate_yield_delta_usd":"0.05",
+       "eth_usd_assumption":"3000"}
+    _authorize(db,"pilot-test",W,(V,),e)
+    assert _evidence_valid(db,"pilot-test",W,(V,),require_fresh=True)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE pilot_authorizations SET authorized_at='2026-01-01T00:00:00+00:00'")
+    assert not _evidence_valid(db,"pilot-test",W,(V,),require_fresh=True)
+    assert _evidence_valid(db,"pilot-test",W,(V,),require_fresh=False)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE pilot_authorizations SET economics_json='{}'")
+    assert not _evidence_valid(db,"pilot-test",W,(V,),require_fresh=False)
