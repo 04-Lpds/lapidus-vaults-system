@@ -7,6 +7,7 @@ All network transport is replaced by the strictly loopback-only ForkRPC.
 No real Base transaction can be sent through this harness.
 """
 from __future__ import annotations
+from dataclasses import asdict
 
 import argparse
 from contextlib import contextmanager
@@ -53,7 +54,9 @@ class _PendingOnce(DepositQuotes):
         }
 
 
-def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str) -> dict:
+def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str = "profitable") -> dict:
+    if scenario not in {"profitable", "uneconomic", "tampered"}:
+        raise ValueError("Unknown synthetic fork scenario")
     addr_word(holder)
     if vault not in VAULTS or int(rpc.call("eth_chainId", []), 16) != 8453:
         raise ValueError("Expected allowlisted Base vault on local Anvil")
@@ -90,6 +93,34 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str) -> dict:
     temporary = tempfile.mkdtemp(prefix="lvs-auto-lifecycle-")
     db_path = str(Path(temporary) / "fork-only.sqlite3")
     campaign_id = "local-autonomous-restart"
+    # Explicit synthetic economics must NEVER be used by the mainnet controller.
+    # This gate is local-only and has no private-key or production database access.
+    from ..operations.campaign_admission import assess_admission
+    economics = {
+        "decision": "REBALANCE_REVIEW_ONLY" if scenario != "uneconomic"
+                    else "HOLD_ESTIMATED_FEES_EXCEED_BENEFIT",
+        "submitted": False, "capital_units": 5_000_000,
+        "estimated_fee_usd": "0.001" if scenario != "uneconomic" else "0.50",
+        "projected_historical_rate_yield_delta_usd": "0.10",
+        "eth_usd_assumption": "3000",
+    }
+    proposed = [asdict(action) for action in actions]
+    if scenario == "tampered":
+        proposed[1]["data"] = DEPOSIT + word(amount + 1) + addr_word(wallet)
+    admission = assess_admission(economics=economics, candidates=proposed,
+                                 wallet=wallet, approved_vaults=(vault,))
+    if admission["status"] != "ADMISSION_REVIEW_ONLY":
+        if scenario == "profitable":
+            raise RuntimeError("Profitable test scenario unexpectedly blocked")
+        return {
+            "status": "FORK_SCENARIO_BLOCKED_NO_TRANSACTIONS",
+            "scenario": scenario, "admission": admission,
+            "campaign_created": False, "signed_transactions": [],
+            "mainnet_broadcast": False,
+        }
+    if scenario != "profitable":
+        raise RuntimeError("Unsafe scenario incorrectly admitted")
+    # Only validated candidate bytes can enter the durable campaign journal.
     create_campaign(db_path, campaign_id, actions)
     sends = []
 
@@ -183,6 +214,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str) -> dict:
 
         return {
             "status": "AUTO_LIFECYCLE_FORK_PASSED",
+            "scenario": scenario, "admission": admission,
             "campaign_id": campaign_id,
             "campaign_state": completed["state"],
             "disposable_wallet": wallet,
@@ -207,10 +239,11 @@ def main(argv=None):
     parser.add_argument("--fork-rpc", default="http://127.0.0.1:8545")
     parser.add_argument("--usdc-holder", required=True)
     parser.add_argument("--vault", required=True, choices=VAULTS)
+    parser.add_argument("--scenario", choices=("profitable", "uneconomic", "tampered"), default="profitable")
     args = parser.parse_args(argv)
     try:
         with ForkRPC(args.fork_rpc) as rpc:
-            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault)
+            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault, scenario=args.scenario)
         print(json.dumps(report, indent=2))
         print("LOCAL ANVIL ONLY. No mainnet signing or broadcast.")
         return 0
