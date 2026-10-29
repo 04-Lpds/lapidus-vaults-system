@@ -41,3 +41,19 @@ def test_live_key_required(tmp_path):
             cycle(db_path=db,wallet=W,protected_wallet=P,allowlist="ignored",
                 rpc_url="https://example.invalid",eth_usd=Decimal("3000"),
                 execute_live=True)
+
+def test_existing_campaign_not_implicitly_authorized(tmp_path):
+    db=str(tmp_path/"pilot.sqlite3")
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE rebalance_campaigns (campaign_id TEXT, state TEXT, created_at TEXT)")
+        conn.execute("INSERT INTO rebalance_campaigns VALUES ('old-manual','ACTIVE','2026-10-29')")
+    with patch("lapidus_vaults.operations.live_pilot.read_policy") as policy:
+        policy.return_value.vault_addresses=(V,)
+        with patch("eth_account.Account.from_key") as account:
+            account.return_value.address=W
+            result=cycle(db_path=db,wallet=W,protected_wallet=P,allowlist="ignored",
+                rpc_url="https://example.invalid",eth_usd=Decimal("3000"),
+                execute_live=True,private_key="synthetic-test-only",
+                controller_fn=lambda **kw: pytest.fail("Must not create campaign"),
+                execute_fn=lambda **kw: pytest.fail("Must never sign unauthorized campaign"))
+    assert result["status"]=="UNAUTHORIZED_EXISTING_CAMPAIGN"
