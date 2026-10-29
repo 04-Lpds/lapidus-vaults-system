@@ -9,6 +9,7 @@ import argparse
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import hashlib
 import os
 from pathlib import Path
 import sqlite3
@@ -47,6 +48,35 @@ def _outstanding(db_path):
         return bool(db.execute("SELECT 1 FROM autonomous_submissions WHERE state!='CONFIRMED' LIMIT 1").fetchone())
 
 
+def _digest(db_path, campaign_id, wallet, vaults):
+    with sqlite3.connect(db_path,timeout=10) as db:
+        row=db.execute("SELECT wallet,plan_json FROM rebalance_campaigns WHERE campaign_id=?",
+                       (campaign_id,)).fetchone()
+    if row is None or row[0]!=wallet.lower():
+        raise RuntimeError("Pilot campaign wallet mismatch")
+    raw=json.dumps({"wallet":wallet.lower(),"vaults":vaults,
+                    "candidate_json":json.loads(row[1])},sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _authorized(db_path, campaign_id, wallet, vaults):
+    with sqlite3.connect(db_path,timeout=10) as db:
+        table=db.execute("SELECT name FROM sqlite_master WHERE name='pilot_authorizations'").fetchone()
+        if table is None:
+            return False
+        row=db.execute("SELECT digest FROM pilot_authorizations WHERE campaign_id=?",
+                       (campaign_id,)).fetchone()
+    return row is not None and row[0]==_digest(db_path,campaign_id,wallet,vaults)
+
+
+def _authorize(db_path,campaign_id,wallet,vaults):
+    digest=_digest(db_path,campaign_id,wallet,vaults)
+    with sqlite3.connect(db_path,timeout=10) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS pilot_authorizations (campaign_id TEXT PRIMARY KEY, digest TEXT NOT NULL)")
+        db.execute("INSERT INTO pilot_authorizations VALUES (?,?)",(campaign_id,digest))
+        db.commit()
+
+
 def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
           execute_live=False,private_key=None,controller_fn=controller_once,
           execute_fn=execute_once):
@@ -71,6 +101,8 @@ def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
     if outstanding or active:
         if not execute_live:
             return {"status":"ACTIVE_OR_PENDING_REVIEW_ONLY","submitted":False}
+        if not active or not _authorized(db_path,active[0],wallet,policy.vault_addresses):
+            return {"status":"UNAUTHORIZED_EXISTING_CAMPAIGN","submitted":False}
         event=execute_fn(db_path=db_path,wallet=wallet.lower(),
             protected_wallet=protected_wallet,approved_vaults=policy.vault_addresses,
             allowlist_path=allowlist,rpc_url=rpc_url,private_key=private_key,
@@ -105,6 +137,7 @@ def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
     if not execute_live:
         return {"status":"CAMPAIGN_CREATED_NOT_AUTHORIZED","campaign_id":campaign_id,
                 "submitted":False,"admission":verdict}
+    _authorize(db_path,campaign_id,wallet,policy.vault_addresses)
     # One transaction at most per cycle; recovery/confirmation unlocks later
     # steps on subsequent cycles, never within an unchecked signing loop.
     event=execute_fn(db_path=db_path,wallet=wallet.lower(),
@@ -147,7 +180,7 @@ def main(argv=None):
                 "AUTO_POLICY_PASSED_AWAITING_SECURE_SIGNER","PENDING_NOT_FOUND","PENDING_MATCHED_INPUT"}
             if event and event.get("status",event.get("state")) not in permitted:
                 return 2
-            if result["status"] in {"CAPITAL_CAP_BLOCKED","ADMISSION_BLOCKED"}:
+            if result["status"] in {"CAPITAL_CAP_BLOCKED","ADMISSION_BLOCKED","UNAUTHORIZED_EXISTING_CAMPAIGN"}:
                 return 2
             if index+1<a.max_cycles:
                 time.sleep(a.interval_seconds)
