@@ -22,6 +22,7 @@ def main(argv=None) -> int:
         ("shadow-service", "Bounded read-only Base monitoring service with fail-closed stop controls"),
         ("scenario-admission", "Run offline synthetic rebalancing admission scenarios"),
         ("scenario-campaign", "Rehearse admission into isolated SQLite campaigns"),
+        ("live-canary", "Explicit two-stage 0.5 USDC real Base cross-vault canary"),
         ("live-pilot", "Bounded Base controller; keyless by default, explicit live opt-in"),
         ("controller-once", "Keyless live observation to review-only campaign"),
         ("console", "Start the local supervised MetaMask console"),
@@ -38,7 +39,7 @@ def main(argv=None) -> int:
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once, shadow_service, live_pilot
+    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once, shadow_service, live_pilot, live_canary
     from .testing import signed_fork_rehearsal, auto_lifecycle_fork
 
     runners = {
@@ -48,6 +49,7 @@ def main(argv=None) -> int:
         "shadow-service": shadow_service.main,
         "scenario-admission": synthetic_admission.main,
         "scenario-campaign": synthetic_campaign_rehearsal.main,
+        "live-canary": live_canary.main,
         "live-pilot": live_pilot.main,
         "controller-once": controller_once.main,
         "console": local_console.main,
