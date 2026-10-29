@@ -121,14 +121,21 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     finally:
         rpc.call("anvil_stopImpersonatingAccount", [holder])
 
-    data_approve = APPROVE + addr_word(vault) + word(amount)
-    data_deposit = DEPOSIT + word(amount) + addr_word(wallet)
-    actions = (
-        UnsignedCandidate(1, (), "approve_intent", 8453,
-                          wallet, BASE_USDC, 0, data_approve, amount),
-        UnsignedCandidate(2, (1,), "deposit_intent", 8453,
-                          wallet, vault, 0, data_deposit, amount),
-    )
+    # The same observed-portfolio candidate builder as the live keyless
+    # controller now produces the signed fork campaign actions.
+    from ..operations.observed_campaign import propose_candidates
+    fork_observation = {"plan": {
+        "chain_id": 8453, "wallet": wallet,
+        "observed_block": int(rpc.call("eth_blockNumber", []), 16),
+        "capital_units": amount, "wallet_usdc_units": rpc.balance(BASE_USDC, wallet),
+        "changes": [{"vault_address": vault, "current_units": 0,
+                     "target_units": amount, "delta_units": amount}],
+    }}
+    actions = propose_candidates(fork_observation, wallet=wallet,
+                                  approved_vaults=(vault,))
+    if [a.method for a in actions] != ["approve_intent", "deposit_intent"]:
+        raise RuntimeError("Fork proposal did not produce expected safe lifecycle")
+
     # Test journal is always isolated from operator's persistent DB.
     temporary = tempfile.mkdtemp(prefix="lvs-auto-lifecycle-")
     db_path = str(Path(temporary) / "fork-only.sqlite3")
