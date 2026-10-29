@@ -65,8 +65,6 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     if len(rpc.call("eth_getCode", [vault, "latest"])) < 10:
         raise RuntimeError("Vault bytecode unavailable")
     amount = 800_000
-    if rpc.balance(BASE_USDC, holder) < amount:
-        raise RuntimeError("Fork holder lacks 0.8 USDC")
 
     # Reject bad synthetic proposals BEFORE funding any disposable wallet.
     # This also ensures repeated negative scenarios cannot consume fork USDC.
@@ -106,6 +104,9 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             "mainnet_broadcast": False,
             "note": "Rejected before fork wallet funding, signing or campaign creation.",
         }
+
+    if rpc.balance(BASE_USDC, holder) < amount:
+        raise RuntimeError("Fork holder lacks 0.8 USDC")
 
     disposable = Account.create()
     wallet = disposable.address.lower()
