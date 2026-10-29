@@ -25,7 +25,7 @@ from .shadow_decision import record
 
 def controller_once(*,db_path:str,wallet:str,allowlist:str,rpc_url:str,
                     eth_usd:Decimal,campaign_id:str,horizon_days:int=30,
-                    drift_bps:int=500)->dict:
+                    drift_bps:int=500,managed_capital_cap_units:int|None=None)->dict:
     if not address_ok(wallet) or not rpc_url.startswith("https://"):
         raise ValueError("Valid wallet and HTTPS Base RPC required")
     if not Path(db_path).is_file():
@@ -36,7 +36,8 @@ def controller_once(*,db_path:str,wallet:str,allowlist:str,rpc_url:str,
     # Reuse the monitor lock to prevent overlapping observations and journals.
     with exclusive_monitor_lock(db_path):
         with ReadOnlyRPC(rpc_url) as rpc, MorphoClient() as morpho:
-            report=observation_report(wallet,allowlist,rpc,morpho)
+            report=(observation_report(wallet,allowlist,rpc,morpho,managed_capital_cap_units=managed_capital_cap_units)
+                    if managed_capital_cap_units is not None else observation_report(wallet,allowlist,rpc,morpho))
             economics=evaluate_live(report,rpc=rpc,morpho=morpho,
                  eth_usd=eth_usd,horizon_days=horizon_days,
                  threshold_bps=drift_bps)
@@ -60,7 +61,8 @@ def controller_once(*,db_path:str,wallet:str,allowlist:str,rpc_url:str,
                 return result
             # Observe freshness and availability again immediately before
             # persisting; any drift invalidates the original economic decision.
-            fresh=observation_report(wallet,allowlist,rpc,morpho)
+            fresh=(observation_report(wallet,allowlist,rpc,morpho,managed_capital_cap_units=managed_capital_cap_units)
+                   if managed_capital_cap_units is not None else observation_report(wallet,allowlist,rpc,morpho))
             if (fresh["plan"]["observed_block"]!=report["plan"]["observed_block"]
                 or fresh["plan"]["wallet_usdc_units"]!=report["plan"]["wallet_usdc_units"]
                 or fresh["plan"]["changes"]!=report["plan"]["changes"]):
