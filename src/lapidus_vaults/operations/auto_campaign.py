@@ -87,17 +87,16 @@ def run_campaign(*, db_path: str, campaign_id: str, wallet: str,
 
 def run_bounded_campaign(*, db_path: str, campaign_id: str, wallet: str,
                          protected_wallet: str, allowlist_path: str, rpc_url: str,
-                         private_key: str, max_capital_units: int = 5_000_000,
+                         private_key: str, admitted_economics: dict,
+                         max_capital_units: int = 5_000_000,
                          execute_fn=execute_once, sleep_fn=time.sleep) -> dict:
-    """Generic approved-campaign driver. NOT exposed as a live CLI.
+    """Bounded controller driver, not exposed through a live CLI.
 
-    The historical run_campaign CLI remains limited to the known 0.8 USDC
-    two-step mainnet trial. This driver is for controlled integration tests
-    until fresh admission-to-execution authorization is independently proven.
+    Admission must be rechecked against the EXACT persisted campaign bytes.
+    Caller is responsible for authenticating the fresh economic observation.
     """
     from .campaign_admission import assess_admission
     from .campaigns import read_campaign
-    from dataclasses import asdict
     if not 0 < max_capital_units <= 5_000_000:
         raise ValueError("Bounded controller requires at most 5 USDC")
     if not os.path.isfile(db_path) or Path("data/STOP_AUTOMATION").exists():
@@ -109,14 +108,40 @@ def run_bounded_campaign(*, db_path: str, campaign_id: str, wallet: str,
     with sqlite3.connect(db_path,timeout=10) as db:
         row=db.execute("SELECT plan_json FROM rebalance_campaigns WHERE campaign_id=?",
                        (campaign_id,)).fetchone()
-    actions=json.loads(row[0])
-    # Enforce calldata/sequence/dependency restrictions even for persisted data.
-    # Admission economics cannot be reconstructed from this bare journal:
-    # caller must pass a separately authenticated admission record.
-    return {"status":"EXECUTION_NOT_AUTHORIZED",
-            "reason":"Persisted candidates alone do not carry a durable economic authorization",
-            "campaign_id":campaign_id,"validated_step_count":len(actions),
-            "submitted":False}
+    candidates=json.loads(row[0])
+    verdict=assess_admission(economics=admitted_economics,candidates=candidates,
+                              wallet=wallet,approved_vaults=policy.vault_addresses)
+    if verdict["status"]!="ADMISSION_REVIEW_ONLY":
+        return {"status":"ADMISSION_BLOCKED","submitted":False,"admission":verdict}
+    # A review decision is NOT live signing consent. Explicit permission must
+    # come from a separately configured authority, so this path stays fork-only.
+    if not rpc_url.startswith("http://127.0.0.1:"):
+        return {"status":"LIVE_EXECUTION_NOT_AUTHORIZED","submitted":False}
+    # execute_once intentionally requires a HTTPS provider. The local fork
+    # test harness supplies its own strictly-loopback RPC adapter.
+    events=[]
+    for _ in range(MAX_INVOCATIONS):
+        if Path("data/STOP_AUTOMATION").exists():
+            raise RuntimeError("Emergency stop active")
+        event=execute_fn(db_path=db_path,wallet=wallet,
+            protected_wallet=protected_wallet,
+            approved_vaults=policy.vault_addresses,
+            allowlist_path=allowlist_path,rpc_url="https://local-only.invalid",
+            private_key=private_key,max_capital_units=max_capital_units)
+        events.append(event)
+        state=campaign_state(db_path,campaign_id)
+        if state=="COMPLETED":
+            return {"status":"CAMPAIGN_COMPLETED","events":events,"submitted":True}
+        if state!="ACTIVE":
+            return {"status":"HALTED_REVIEW_REQUIRED","events":events}
+        status=event.get("status",event.get("state"))
+        if status in {"SUBMITTED","PENDING_NOT_FOUND","PENDING_MATCHED_INPUT"}:
+            sleep_fn(POLL_SECONDS)
+            continue
+        if status=="RECEIPT_AND_BLOCK_MATCH":
+            continue
+        return {"status":"HALTED_REVIEW_REQUIRED","events":events}
+    return {"status":"PAUSED_INVOCATION_LIMIT","events":events}
 
 def main(argv=None):
     p=argparse.ArgumentParser(description="Execute one 0.8 USDC campaign end-to-end, with strict recovery gates")
