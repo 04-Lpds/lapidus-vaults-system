@@ -37,7 +37,7 @@ def test_live_key_required(tmp_path):
     sqlite3.connect(db).close()
     with patch("lapidus_vaults.operations.live_pilot.read_policy") as policy:
         policy.return_value.vault_addresses=(V,)
-        with pytest.raises(ValueError,match="signer"):
+        with pytest.raises(ValueError,match="SIGNER_KEY_MISSING"):
             cycle(db_path=db,wallet=W,protected_wallet=P,allowlist="ignored",
                 rpc_url="https://example.invalid",eth_usd=Decimal("3000"),
                 execute_live=True)
