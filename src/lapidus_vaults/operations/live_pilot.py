@@ -128,10 +128,16 @@ def cycle(*,db_path,wallet,protected_wallet,allowlist,rpc_url,eth_usd,
         raise ValueError("Pilot must contain one or two explicitly allowed vaults")
     if execute_live:
         if not private_key:
-            raise ValueError("Explicit live mode requires dedicated signer key")
+            raise ValueError("SIGNER_KEY_MISSING")
+        # Verify format and identity locally. Never echo the raw key or
+        # underlying library exception, which can include sensitive input.
         from eth_account import Account
-        if Account.from_key(private_key).address.lower()!=wallet.lower():
-            raise ValueError("Dedicated signer wallet mismatch")
+        try:
+            derived=Account.from_key(private_key).address.lower()
+        except Exception:
+            raise ValueError("SIGNER_KEY_INVALID_FORMAT") from None
+        if derived!=wallet.lower():
+            raise ValueError("SIGNER_WALLET_MISMATCH")
     # Unresolved transaction hashes MUST be recovered before any new campaign.
     outstanding=_outstanding(db_path)
     active=_state(db_path)
@@ -221,8 +227,11 @@ def main(argv=None):
         print("PILOT INTERRUPTED. Confirm pending transaction status before restart.")
         return 0
     except Exception as exc:
-        print("PILOT HALTED: "+type(exc).__name__+
-              ". Inspect executor journal and on-chain receipts before restart.",file=sys.stderr)
+        safe_codes={"SIGNER_KEY_MISSING","SIGNER_KEY_INVALID_FORMAT",
+                    "SIGNER_WALLET_MISMATCH"}
+        reason=str(exc) if isinstance(exc,ValueError) and str(exc) in safe_codes else type(exc).__name__
+        print("PILOT HALTED: "+reason+
+              ". No automatic retry; inspect executor journal if any transaction was submitted.",file=sys.stderr)
         return 1
 
 
