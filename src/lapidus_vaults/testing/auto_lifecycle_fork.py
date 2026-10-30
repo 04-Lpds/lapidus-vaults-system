@@ -110,8 +110,11 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             "note": "Rejected before fork wallet funding, signing or campaign creation.",
         }
 
-    if rpc.balance(BASE_USDC, holder) < amount:
-        raise RuntimeError("Fork holder lacks 0.8 USDC")
+    # Seed a small surplus into the source vault: ERC-4626 share rounding
+    # can make withdrawing exactly the deposited assets require extra shares.
+    seed_amount = amount + 10_000 if destination is not None else amount
+    if rpc.balance(BASE_USDC, holder) < seed_amount:
+        raise RuntimeError("Fork holder lacks seed USDC")
 
     disposable = Account.create()
     wallet = disposable.address.lower()
@@ -121,7 +124,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     rpc.call("anvil_impersonateAccount", [holder])
     try:
         rpc.transact(BASE_USDC, holder,
-                     "0xa9059cbb" + addr_word(wallet) + word(amount),
+                     "0xa9059cbb" + addr_word(wallet) + word(seed_amount),
                      step="fund disposable auto-test wallet")
     finally:
         rpc.call("anvil_stopImpersonatingAccount", [holder])
@@ -132,10 +135,10 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         rpc.call("anvil_impersonateAccount", [wallet])
         try:
             rpc.transact(BASE_USDC, wallet,
-                APPROVE + addr_word(vault) + word(amount),
+                APPROVE + addr_word(vault) + word(seed_amount),
                 step="seed source vault approval")
             rpc.transact(vault, wallet,
-                DEPOSIT + word(amount) + addr_word(wallet),
+                DEPOSIT + word(seed_amount) + addr_word(wallet),
                 step="seed source vault position")
         finally:
             rpc.call("anvil_stopImpersonatingAccount", [wallet])
