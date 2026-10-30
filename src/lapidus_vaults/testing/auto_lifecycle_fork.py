@@ -54,7 +54,7 @@ class _PendingOnce(DepositQuotes):
         }
 
 
-def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str = "profitable", destination: str | None = None, inject_post_broadcast_crash: bool = False) -> dict:
+def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str = "profitable", destination: str | None = None, inject_post_broadcast_crash: bool = False, controller_originated: bool = False) -> dict:
     if scenario not in {"profitable", "uneconomic", "tampered"}:
         raise ValueError("Unknown synthetic fork scenario")
     addr_word(holder)
@@ -201,7 +201,53 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     if scenario != "profitable":
         raise RuntimeError("Unsafe scenario incorrectly admitted")
     # Only validated candidate bytes can enter the durable campaign journal.
-    create_campaign(db_path, campaign_id, actions)
+    if controller_originated:
+        # Invoke the actual keyless controller on the fork-backed observed
+        # wallet balance. Economic assumptions are deliberately synthetic,
+        # not a live APY oracle; they cannot activate mainnet signing.
+        from ..operations import controller_once as controller_module
+        from ..wallet_plan import read_policy as original_read_policy
+        def observed(_wallet, _allowlist, _rpc, _morpho, **_kw):
+            if _wallet.lower() != wallet:
+                raise ValueError("Controller wallet changed")
+            return {"plan":{"chain_id":8453,"wallet":wallet,
+                "observed_block":int(rpc.call("eth_blockNumber",[]),16),
+                "capital_units":amount,
+                "wallet_usdc_units":rpc.balance(BASE_USDC,wallet),
+                "changes": ([{"vault_address":vault,"current_units":amount,
+                    "target_units":0,"delta_units":-amount},
+                    {"vault_address":destination,"current_units":0,
+                    "target_units":amount,"delta_units":amount}]
+                    if destination is not None else
+                    [{"vault_address":vault,"current_units":0,
+                    "target_units":amount,"delta_units":amount}])}}
+        from types import SimpleNamespace
+        def synthetic_economics(_report, **_kw):
+            return dict(economics, limitations="FORK ONLY: controlled hypothetical APY and costs")
+        # The snapshot and chosen target are fork-backed; the economic
+        # approval is a controlled test input. Only loopback RPC is opened.
+        with patch.object(controller_module,"ReadOnlyRPC",lambda _: _read_adapter(rpc)), patch.object(
+            controller_module,"MorphoClient",_UnusedClient), patch.object(
+            controller_module,"observation_report",observed), patch.object(
+            controller_module,"evaluate_live",synthetic_economics), patch.object(
+            controller_module,"read_policy",lambda _:SimpleNamespace(
+                vault_addresses=(vault,destination) if destination else (vault,))):
+            created=controller_module.controller_once(
+                db_path=db_path,wallet=wallet,allowlist="fork-only",
+                rpc_url="https://local-only.invalid",eth_usd=__import__("decimal").Decimal("3000"),
+                campaign_id=campaign_id)
+        if created["status"]!="CAMPAIGN_CREATED_REVIEW_ONLY":
+            raise RuntimeError("Controller failed to originate fork campaign")
+        # The originating controller must produce exactly the same bytes
+        # the independent observed-candidate helper projected.
+        import sqlite3
+        with sqlite3.connect(db_path) as db:
+            saved=db.execute("SELECT plan_json FROM rebalance_campaigns WHERE campaign_id=?",
+                             (campaign_id,)).fetchone()
+        if saved is None or json.loads(saved[0])!=proposed:
+            raise RuntimeError("Controller-generated action bytes differ from observation")
+    else:
+        create_campaign(db_path, campaign_id, actions)
     sends = []
 
     def fork_broadcast(**kwargs):
@@ -314,6 +360,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             "journal": journal,
             "pending_without_resend": True,
             "post_broadcast_crash_injected": inject_post_broadcast_crash,
+            "controller_originated": controller_originated,
             "recovered_after_restart": True,
             "repeated_submission_count": len(sends),
             "mainnet_broadcast": False,
@@ -335,10 +382,11 @@ def main(argv=None):
     parser.add_argument("--destination", choices=VAULTS, help="Optional destination vault for unattended cross-vault lifecycle")
     parser.add_argument("--scenario", choices=("profitable", "uneconomic", "tampered"), default="profitable")
     parser.add_argument("--inject-post-broadcast-crash",action="store_true")
+    parser.add_argument("--controller-originated",action="store_true",help="Have actual read-only controller create fork campaign from observed wallet; economics controlled")
     args = parser.parse_args(argv)
     try:
         with ForkRPC(args.fork_rpc) as rpc:
-            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault, scenario=args.scenario, destination=args.destination, inject_post_broadcast_crash=args.inject_post_broadcast_crash)
+            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault, scenario=args.scenario, destination=args.destination, inject_post_broadcast_crash=args.inject_post_broadcast_crash, controller_originated=args.controller_originated)
         print(json.dumps(report, indent=2))
         print("LOCAL ANVIL ONLY. No mainnet signing or broadcast.")
         return 0
