@@ -16,6 +16,7 @@ def main(argv=None) -> int:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
+        ("idle-campaign-rehearsal", "Offline idle-capital candidate and campaign admission rehearsal"),
         ("pilot-config-preview", "Validate proposed $20 limits without enabling live execution"),
         ("status", "Read-only executor journal and latest allocation economics"),
         ("risk-report", "Read-only offline vault/underlying market concentration report"),
@@ -42,10 +43,11 @@ def main(argv=None) -> int:
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once, shadow_service, live_pilot, live_canary, risk_gate, operator_status, pilot_config_preview
+    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once, shadow_service, live_pilot, live_canary, risk_gate, operator_status, pilot_config_preview, idle_campaign_rehearsal
     from .testing import signed_fork_rehearsal, auto_lifecycle_fork
 
     runners = {
+        "idle-campaign-rehearsal": idle_campaign_rehearsal.main,
         "pilot-config-preview": pilot_config_preview.main,
         "status": operator_status.main,
         "risk-report": risk_gate.main,
