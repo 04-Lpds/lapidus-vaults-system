@@ -237,9 +237,26 @@ def main(argv=None):
 
 def _run_cycles(a,usd,rpc_url,private_key):
     for index in range(a.max_cycles):
-        result=cycle(db_path=a.db,wallet=a.wallet,protected_wallet=a.protected_wallet,
-                     allowlist=a.allowlist,rpc_url=rpc_url,eth_usd=usd,
-                     execute_live=a.execute_live,private_key=private_key)
+        try:
+            result=cycle(db_path=a.db,wallet=a.wallet,protected_wallet=a.protected_wallet,
+                         allowlist=a.allowlist,rpc_url=rpc_url,eth_usd=usd,
+                         execute_live=a.execute_live,private_key=private_key)
+        except Exception as exc:
+            # Never log exception text: RPC/provider errors may contain API keys.
+            # A failed observation must never trigger a blind transaction retry.
+            known={
+                "Wallet capital outside unattended policy":"CAPITAL_POLICY_BLOCKED",
+                "Missing historical APY; economic decision unavailable":"MISSING_APY",
+                "APY outside bounded analysis range":"APY_RANGE_BLOCKED",
+                "Insufficient ETH reserve":"GAS_RESERVE_BLOCKED",
+                "Insufficient shares or invalid previewWithdraw":"WITHDRAWAL_CAPACITY_BLOCKED",
+                "Invalid wallet snapshot":"SNAPSHOT_INVALID",
+            }
+            reason=known.get(str(exc),type(exc).__name__)
+            print(json.dumps({"cycle":index+1,"status":"CYCLE_HALTED",
+                "error_code":reason,"submitted":False,
+                "warning":"Check local journal and chain before resuming; an exception alone cannot establish whether a send occurred."}),flush=True)
+            return 1
         print(json.dumps({"cycle":index+1,**result},default=str),flush=True)
         if result.get("status")=="STOPPED_BY_OPERATOR":
             return 0
