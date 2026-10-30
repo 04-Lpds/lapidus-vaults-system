@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import pytest
 
 from lapidus_vaults.allocator import BASE_CHAIN, BASE_USDC
 from lapidus_vaults.rpc_verify import (
@@ -194,3 +195,44 @@ def test_module_help_exposes_commands():
     from lapidus_vaults.rpc_verify import _cli_parser
     help_text = _cli_parser().format_help()
     assert '--allowlist' in help_text and '--wallet' in help_text
+
+
+def test_nonce_read_uses_validated_rpc_transport():
+    calls = []
+    def handler(request):
+        payload = json.loads(request.content)
+        calls.append(payload)
+        return httpx.Response(200, json={"jsonrpc":"2.0", "id":payload["id"], "result":"0x7"})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with ReadOnlyRPC("https://example.test", client=client) as rpc:
+            assert rpc.transaction_count(WALLET, "latest") == 7
+            assert rpc.transaction_count(WALLET, "pending") == 7
+            with pytest.raises(ValueError, match="nonce"):
+                rpc.transaction_count(WALLET, "earliest")
+    assert [p["method"] for p in calls] == ["eth_getTransactionCount"] * 2
+    assert [p["params"] for p in calls] == [[WALLET, "latest"], [WALLET, "pending"]]
+
+
+@pytest.mark.parametrize("result", [None, {}, 1, "not-hex"])
+def test_bad_nonce_result_fails_closed(result):
+    def handler(request):
+        payload = json.loads(request.content)
+        return httpx.Response(200, json={"jsonrpc":"2.0", "id":payload["id"], "result":result})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with ReadOnlyRPC("https://example.test", client=client) as rpc:
+            with pytest.raises(RPCError):
+                rpc.transaction_count(WALLET, "pending")
+
+
+def test_nonce_transport_traceback_does_not_reveal_endpoint():
+    import traceback
+    def handler(request):
+        return httpx.Response(403, text="denied")
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with ReadOnlyRPC("https://example.test/private-rpc-credential", client=client) as rpc:
+            try:
+                rpc.transaction_count(WALLET, "pending")
+            except RPCError as exc:
+                assert "private-rpc-credential" not in "".join(traceback.format_exception(exc))
+            else:
+                raise AssertionError("transport failure must propagate as sanitized RPCError")

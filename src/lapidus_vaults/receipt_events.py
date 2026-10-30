@@ -3,6 +3,7 @@ from __future__ import annotations
 from .allocator import BASE_USDC, address_ok
 
 TRANSFER_TOPIC="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+APPROVAL_TOPIC="0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
 ZERO="0x"+"0"*40
 
 def _topic_addr(topic):
@@ -50,8 +51,23 @@ def reconcile_transfer_logs(receipt,wallet,vault,amount_units,stage):
         match=received==amount_units and burned>0
         data={"usdc_to_wallet_units":received,"burned_shares":burned}
     else:
-        match=True
-        data={"note":"Approvals have no expected Transfer logs; receipt status and allowance must be verified separately"}
+        approvals = []
+        for entry in receipt.get("logs", []):
+            topics = entry.get("topics", [])
+            if (entry.get("address", "").lower() != BASE_USDC or not topics
+                    or str(topics[0]).lower() != APPROVAL_TOPIC):
+                continue
+            raw = entry.get("data")
+            if (len(topics) != 3 or not isinstance(raw, str)
+                    or not raw.startswith("0x") or len(raw) != 66):
+                raise ValueError("Malformed ERC20 Approval log")
+            owner, spender = _topic_addr(topics[1]), _topic_addr(topics[2])
+            if owner == wallet:
+                approvals.append((owner, spender, int(raw, 16)))
+        wallet_movements = any(token in {BASE_USDC, vault} and wallet in {src, dst}
+                               for token, src, dst, _ in transfers)
+        match = approvals == [(wallet, vault, amount_units)] and not wallet_movements
+        data = {"exact_approval_event": match}
     return {"status":"RECEIPT_LOGS_MATCH" if match else "RECEIPT_LOGS_MISMATCH",
             "transaction_scoped":True,"matched":match,**data,
             "financial_reconciliation_complete":False}

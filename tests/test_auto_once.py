@@ -29,3 +29,19 @@ def test_execution_lock_blocks_concurrent_runs(tmp_path):
             with execution_lock(db):
                 pass
     assert not Path(db+".auto.lock").exists()
+
+
+def test_missing_explicit_signer_policy_blocks_before_rpc(tmp_path, monkeypatch):
+    from lapidus_vaults.operations import auto_once
+    from unittest.mock import Mock
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LVS_SIGNER_POLICY", raising=False)
+    rpc = Mock(side_effect=AssertionError("must not access RPC"))
+    monkeypatch.setattr(auto_once, "ReadOnlyRPC", rpc)
+    with pytest.raises(ValueError, match="signer policy"):
+        execute_once(db_path="unused.sqlite", wallet=W, protected_wallet=P,
+                     approved_vaults=(V,), allowlist_path="unused",
+                     rpc_url="https://example.invalid", private_key="invalid",
+                     max_capital_units=10_000_000)
+    rpc.assert_not_called()
+    assert not Path("unused.sqlite").exists()

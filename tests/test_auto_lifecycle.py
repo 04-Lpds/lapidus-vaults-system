@@ -10,6 +10,7 @@ from eth_account import Account
 import pytest
 
 from lapidus_vaults.operations import auto_once
+from lapidus_vaults.operations.signer_policy import SignerPolicy
 from lapidus_vaults.operations.auto_journal import reserve, mark_submitted, current
 from lapidus_vaults.operations.campaigns import create_campaign, read_campaign
 from lapidus_vaults.unsigned_candidates import UnsignedCandidate, APPROVE, DEPOSIT
@@ -105,7 +106,10 @@ def test_auto_runner_full_restart_and_unknown_receipt(tmp_path, monkeypatch):
             db_path=db,wallet=wallet,protected_wallet=PROTECTED,
             approved_vaults=(VAULT,),allowlist_path="fake.json",
             rpc_url="https://example.invalid",private_key=key,
-            max_capital_units=10_000_000)
+            max_capital_units=10_000_000,
+            signer_policy=SignerPolicy(wallet, PROTECTED, (8453,), (VAULT,),
+                (BASE_USDC,), ("approve", "deposit"), 1_000_000,
+                50_000_000_000_000, 200_000_000_000_000))
 
     assert run()["state"]=="SUBMITTED"
     assert len(sent)==1

@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
-import httpx
+import time
 
 from ..allocator import address_ok
 from ..client import MorphoClient
@@ -28,6 +28,7 @@ from .campaign_quote import quote_next_campaign_action
 from .receipt_bridge import bind_campaign_quote, advance_bound_campaign
 from .auto_journal import current, mark_verified
 from .dedicated_signer import reserve_and_broadcast
+from .signer_policy import SignerPolicy, load_signer_policy
 
 
 @contextmanager
@@ -45,16 +46,8 @@ def execution_lock(db_path: str):
 def read_nonce(rpc_url: str, wallet: str, tag: str) -> int:
     if tag not in {"latest", "pending"}:
         raise ValueError("Invalid nonce block tag")
-    with httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as client:
-        response = client.post(rpc_url, json={
-            "jsonrpc": "2.0", "id": 1, "method": "eth_getTransactionCount",
-            "params": [wallet, tag],
-        })
-        response.raise_for_status()
-        data=response.json()
-    if data.get("error") or not isinstance(data.get("result"), str):
-        raise RuntimeError("Cannot establish dedicated wallet nonce")
-    return int(data["result"],16)
+    with ReadOnlyRPC(rpc_url) as rpc:
+        return rpc.transaction_count(wallet, tag)
 
 
 def _load_consumed(db_path: str, quote_id: str) -> dict:
@@ -138,7 +131,8 @@ def assert_no_orphaned_authorizations(db_path: str) -> None:
 
 def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
                  approved_vaults: tuple[str,...], allowlist_path: str, rpc_url: str,
-                 private_key: str, max_capital_units: int) -> dict:
+                 private_key: str, max_capital_units: int,
+                 signer_policy: SignerPolicy | None = None) -> dict:
     # No new action if an emergency stop file is present.
     if Path("data/STOP_AUTOMATION").exists():
         raise RuntimeError("Emergency stop file exists; execution disabled")
@@ -148,9 +142,19 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
         raise ValueError("Live RPC must be a trusted HTTPS endpoint")
     policy=AutoPolicy(wallet=wallet.lower(),vault_allowlist=approved_vaults,
                       max_action_units=1_000_000,max_capital_units=max_capital_units)
+    # All entry points require an explicit public policy; never infer authorization.
+    signer_policy = signer_policy or load_signer_policy(os.environ.get("LVS_SIGNER_POLICY", ""))
+    if (signer_policy.execution_address != policy.wallet
+            or signer_policy.protected_address != protected_wallet.lower()
+            or signer_policy.vault_allowlist != approved_vaults):
+        raise ValueError("Executor configuration differs from signer policy")
     # Check private-key identity before network writes and never echo the key.
     from eth_account import Account
-    if Account.from_key(private_key).address.lower() != policy.wallet:
+    try:
+        signer_address = Account.from_key(private_key).address.lower()
+    except (ValueError, TypeError):
+        raise ValueError("Invalid runtime signing key") from None
+    if signer_address != policy.wallet:
         raise ValueError("Dedicated signer does not match configured wallet")
     with execution_lock(db_path):
         with ReadOnlyRPC(rpc_url) as rpc:
@@ -180,24 +184,28 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
             with MorphoClient() as morpho:
                 report=build_live_readonly_plan(
                     wallet, allowlist_path,rpc,morpho,
-                    eth_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE)
+                    eth_reserve_wei=signer_policy.min_eth_reserve_wei)
             observed_units=report["plan"]["capital_units"]
             action=next_auto_action(db_path,policy=policy,
                                     observed_capital_units=observed_units,
                                     current_chain_id=rpc.chain_id())
             if action["status"]!="AUTO_POLICY_PASSED_AWAITING_SECURE_SIGNER":
                 return {"status":action["status"],"submitted":False}
+            if (action["method"].removesuffix("_intent") not in signer_policy.operation_allowlist
+                    or action["amount_units"] > signer_policy.max_action_units):
+                raise ValueError("Campaign action exceeds explicit signer authorization")
             # Nonce gap/pending wallet transaction blocks sending.
             nonce_latest=read_nonce(rpc_url,policy.wallet,"latest")
             nonce_pending=read_nonce(rpc_url,policy.wallet,"pending")
             if nonce_latest!=nonce_pending:
                 raise RuntimeError("Dedicated wallet has other pending transactions")
-            deposits, withdrawals = DepositQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE), WithdrawalQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE)
+            deposits, withdrawals = DepositQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei), WithdrawalQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei)
             quote=quote_next_campaign_action(
                 db_path,wallet=policy.wallet,approved_vaults=approved_vaults,
                 rpc=rpc,deposits=deposits,withdrawals=withdrawals)
             engine=withdrawals if quote["stage"]=="withdraw" else deposits
             consumed=engine.consume(rpc,quote["quote_id"])
+            consumed["authorized_at_unix"] = time.time()
             with sqlite3.connect(db_path,timeout=10) as db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute("""CREATE TABLE IF NOT EXISTS live_deposit_authorizations (
@@ -225,6 +233,7 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
                 policy_wallet=policy.wallet,protected_wallet=protected_wallet,
                 private_key=private_key,rpc_url=rpc_url,nonce=nonce_pending,
                 gas_price_wei=rpc.gas_price_wei(),approved_vaults=approved_vaults,
+                policy=signer_policy,
             )
 
 
