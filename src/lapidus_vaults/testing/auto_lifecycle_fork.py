@@ -171,6 +171,11 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
     # Test journal is always isolated from operator's persistent DB.
     temporary = tempfile.mkdtemp(prefix="lvs-auto-lifecycle-")
     db_path = str(Path(temporary) / "fork-only.sqlite3")
+    # Controller requires a pre-existing SQLite database; initialize only
+    # the disposable fork journal, never an operator/mainnet database.
+    import sqlite3
+    with sqlite3.connect(db_path):
+        pass
     campaign_id = "local-autonomous-restart"
     # Explicit synthetic economics must NEVER be used by the mainnet controller.
     # This gate is local-only and has no private-key or production database access.
@@ -244,7 +249,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         with sqlite3.connect(db_path) as db:
             saved=db.execute("SELECT plan_json FROM rebalance_campaigns WHERE campaign_id=?",
                              (campaign_id,)).fetchone()
-        if saved is None or json.loads(saved[0])!=proposed:
+        if saved is None or json.loads(saved[0])!=json.loads(json.dumps(proposed)):
             raise RuntimeError("Controller-generated action bytes differ from observation")
     else:
         create_campaign(db_path, campaign_id, actions)
