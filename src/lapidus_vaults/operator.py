@@ -16,6 +16,7 @@ def main(argv=None) -> int:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
+        ("status", "Read-only executor journal and latest allocation economics"),
         ("risk-report", "Read-only offline vault/underlying market concentration report"),
         ("monitor", "Collect and persist a read-only live portfolio observation"),
         ("shadow-decision", "Record read-only allocation drift and fee-vs-yield decision"),
@@ -40,10 +41,11 @@ def main(argv=None) -> int:
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once, shadow_service, live_pilot, live_canary, risk_gate
+    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once, shadow_service, live_pilot, live_canary, risk_gate, operator_status
     from .testing import signed_fork_rehearsal, auto_lifecycle_fork
 
     runners = {
+        "status": operator_status.main,
         "risk-report": risk_gate.main,
         "monitor": monitor_once.main,
         "shadow-decision": shadow_decision.main,
