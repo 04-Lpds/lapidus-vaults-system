@@ -38,11 +38,16 @@ generation process separately before scheduling this option.
 1. Checks the journal for an unresolved earlier submission and only performs
    an RPC receipt check; **never sends a second copy**.
 2. When all previous steps are verified, fetches a fresh RPC/API snapshot and
-   quote, consumes the quote, saves and binds the authorization, reserves a
-   transaction in SQLite, signs an EIP-1559 transaction with the dedicated
-   wallet, persists the signed hash, then sends that exact raw transaction.
+   quote, consumes the quote, saves and binds the authorization, revalidates and signs an EIP-1559
+   transaction with the dedicated wallet, reserves it in SQLite, persists the
+   signed hash, then sends that exact raw transaction.
 3. Returns without automatically advancing any later step. A subsequent
    scheduled invocation must first reconcile the receipt.
+
+See [DEDICATED_SIGNER.md](DEDICATED_SIGNER.md) for the required public
+`LVS_SIGNER_POLICY` schema and ownership assumptions. The executor now refuses
+missing or mismatched signer policy; earlier live command examples alone are
+insufficient to authorize signing.
 
 ## Mandatory execution controls
 

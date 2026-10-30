@@ -21,7 +21,8 @@ from .autopilot_policy import AutoPolicy, next_auto_action
 from .campaign_quote import quote_next_campaign_action
 from ..live_deposit import DepositQuotes
 from ..live_withdraw import WithdrawalQuotes
-from .dedicated_signer import MAX_TRANSACTION_FEE_WEI, MAX_GAS_LIMIT
+from .dedicated_signer import MAX_GAS_LIMIT
+from .signer_policy import load_signer_policy
 
 
 def preflight(*, db_path: str, wallet: str, protected_wallet: str,
@@ -85,9 +86,21 @@ def preflight(*, db_path: str, wallet: str, protected_wallet: str,
         }
         if action["status"]!="AUTO_POLICY_PASSED_AWAITING_SECURE_SIGNER":
             return result
+        try:
+            signer_policy = load_signer_policy(os.environ.get("LVS_SIGNER_POLICY", ""))
+            if (signer_policy.execution_address != wallet
+                    or signer_policy.protected_address != protected_wallet.lower()
+                    or signer_policy.vault_allowlist != policy.vault_allowlist
+                    or action["method"].removesuffix("_intent") not in signer_policy.operation_allowlist
+                    or action["amount_units"] > signer_policy.max_action_units):
+                raise ValueError("Signer policy differs from campaign configuration")
+        except ValueError:
+            result["status"] = "PREFLIGHT_SIGNER_POLICY_BLOCKED"
+            return result
         q=quote_next_campaign_action(
             db_path,wallet=wallet,approved_vaults=policy.vault_allowlist,
-            rpc=rpc,deposits=DepositQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE),withdrawals=WithdrawalQuotes())
+            rpc=rpc,deposits=DepositQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei),
+            withdrawals=WithdrawalQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei))
         gas=int(q["gas"],16)
         worst_fee=gas*gas_price*2
         result.update(
@@ -95,8 +108,8 @@ def preflight(*, db_path: str, wallet: str, protected_wallet: str,
             stage=q["stage"],amount_units=q["amount_units"],
             estimated_gas_limit=gas,worst_case_fee_wei=worst_fee,
             gas_cap_passed=(gas<=MAX_GAS_LIMIT and
-                            worst_fee<=MAX_TRANSACTION_FEE_WEI),
-            funded_for_worst_case_fee=eth_wei>=worst_fee,
+                            worst_fee<=signer_policy.max_total_fee_wei),
+            funded_for_worst_case_fee=eth_wei>=signer_policy.min_eth_reserve_wei+worst_fee,
         )
         result["status"]=("PREFLIGHT_READY_NO_BROADCAST" if
                           result["gas_cap_passed"] and result["funded_for_worst_case_fee"]

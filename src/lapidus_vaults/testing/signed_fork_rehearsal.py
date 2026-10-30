@@ -14,6 +14,7 @@ from ..fork_roundtrip import ForkRPC, VAULTS, BASE_USDC, ASSET, addr_word, word
 from ..fork_campaign_rehearsal import LocalForkReadAdapter
 from ..live_deposit import DepositQuotes
 from ..operations.dedicated_signer import prepare_signed_transaction
+from ..operations.signer_policy import SignerPolicy
 
 def _send(rpc: ForkRPC, raw: str, hash_expected: str) -> str:
     tx_hash = rpc.call("eth_sendRawTransaction", [raw])
@@ -65,6 +66,7 @@ def run_signed_fork(rpc: ForkRPC, holder: str, vault: str) -> dict:
         if quote["stage"]!=expected_stage:
             raise RuntimeError("Expected exact approve -> deposit progression")
         consumed=engine.consume(read,quote["quote_id"])
+        consumed["authorized_at_unix"] = time.time()
         candidate={"method":expected_stage+"_intent","chain_id":8453,
                    "from_address":wallet,"to_address":consumed["to"],
                    "data":consumed["data"],"requested_assets_units":amount}
@@ -75,7 +77,10 @@ def run_signed_fork(rpc: ForkRPC, holder: str, vault: str) -> dict:
             gas_price_wei=read.gas_price_wei(),approved_vaults=(vault,),
             # Anvil may inherit Base fork gas pricing much higher than the
             # production live cap. This override is LOCAL TEST ONLY.
-            max_total_fee_wei=5_000_000_000_000_000
+            rpc=read, policy=SignerPolicy(
+                wallet, holder.lower(), (8453,), (vault,), (BASE_USDC,),
+                ("approve", "deposit"), amount, 5_000_000_000_000_000,
+                2_000_000_000_000_000)
         )
         tx_hash=_send(rpc,signed["raw"],signed["tx_hash"])
         result=engine.check_receipt(read,quote["quote_id"],tx_hash)

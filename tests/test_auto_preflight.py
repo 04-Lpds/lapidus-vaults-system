@@ -53,3 +53,47 @@ def test_reports_real_eth_with_dedicated_reserve(tmp_path, monkeypatch):
     assert result["status"]=="PREFLIGHT_READ_ONLY"
     assert result["campaign_status"]=="NO_ACTIVE_CAMPAIGN"
     assert result["submitted"] is False
+
+
+@pytest.mark.parametrize("configured,eth,expected", [
+    (False, 10**15, "PREFLIGHT_SIGNER_POLICY_BLOCKED"),
+    (True, 10**15, "PREFLIGHT_READY_NO_BROADCAST"),
+    (True, 205_000_000_000_000, "PREFLIGHT_GAS_OR_FUNDING_BLOCKED"),
+])
+def test_preflight_requires_policy_and_preserves_fee_reserve(tmp_path, monkeypatch, configured, eth, expected):
+    import json
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+    from dataclasses import asdict
+    from lapidus_vaults.operations.signer_policy import SignerPolicy
+    from lapidus_vaults.allocator import BASE_USDC
+    vault = "0x"+"2"*40
+    db = tmp_path / "campaign.sqlite"
+    db.touch()
+    monkeypatch.delenv("LVS_SIGNER_POLICY", raising=False)
+    if configured:
+        policy = SignerPolicy(WALLET, PROTECTED, (8453,), (vault,), (BASE_USDC,),
+                              ("deposit",), 1_000_000, 50_000_000_000_000, 200_000_000_000_000)
+        path = tmp_path / "policy.json"
+        path.write_text(json.dumps(asdict(policy)))
+        monkeypatch.setenv("LVS_SIGNER_POLICY", str(path))
+    rpc = Mock()
+    rpc.chain_id.return_value = 8453
+    rpc.block_number.return_value = 100
+    rpc.eth_balance.return_value = eth
+    rpc.gas_price_wei.return_value = 100_000_000
+    monkeypatch.setattr(auto_preflight, "ReadOnlyRPC", lambda _: nullcontext(rpc))
+    monkeypatch.setattr(auto_preflight, "MorphoClient", lambda: nullcontext(Mock()))
+    monkeypatch.setattr(auto_preflight, "read_policy", lambda _: type("Policy", (), {"vault_addresses":(vault,)})())
+    monkeypatch.setattr(auto_preflight, "build_live_readonly_plan", lambda *a, **kw: {"plan":{"capital_units":1_000_000}})
+    monkeypatch.setattr(auto_preflight, "next_auto_action", lambda *a, **kw: {
+        "status":"AUTO_POLICY_PASSED_AWAITING_SECURE_SIGNER", "method":"deposit_intent",
+        "amount_units":800_000, "campaign_id":"campaign", "sequence":1})
+    quote = Mock(return_value={"gas":"0x186a0", "stage":"deposit", "amount_units":800_000})
+    monkeypatch.setattr(auto_preflight, "quote_next_campaign_action", quote)
+    result = preflight(db_path=str(db), wallet=WALLET, protected_wallet=PROTECTED,
+                       allowlist_path="unused", rpc_url="https://example.invalid")
+    assert result["status"] == expected
+    assert result["submitted"] is False and result["signing_key_accessed"] is False
+    if not configured:
+        quote.assert_not_called()

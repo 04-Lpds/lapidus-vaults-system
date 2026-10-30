@@ -82,6 +82,14 @@ using Anvil impersonation only. It tests production quote/receipt components,
 persistent authorization recovery, and a crash-safe submission reservation
 journal. It **does not sign or broadcast to real Base**.
 
+## Explicit dedicated signer policy
+
+Dedicated execution requires a separate public `LVS_SIGNER_POLICY` JSON file
+with explicit execution/protected addresses and chain, asset, vault and operation
+allowlists. Missing or mismatched policy blocks signing; no alternate wallet is
+used. See [signer configuration, architecture audit and local testing](docs/DEDICATED_SIGNER.md).
+This change does not enable live execution or configure a mainnet scheduler.
+
 ## Project structure
 
 - `src/lapidus_vaults/allocator.py`, `wallet_plan.py`, `safety_plan.py`:

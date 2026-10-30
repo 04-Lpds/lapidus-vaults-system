@@ -28,6 +28,7 @@ from ..operations.auto_journal import (
     reserve, mark_submitted, current,
 )
 from ..operations.dedicated_signer import prepare_signed_transaction
+from ..operations.signer_policy import SignerPolicy
 from ..operations import auto_once
 from ..live_deposit import DepositQuotes
 from .signed_fork_rehearsal import _send
@@ -265,7 +266,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             gas_price_wei=kwargs["gas_price_wei"],
             approved_vaults=kwargs["approved_vaults"],
             # Synthetic fork prices only; live default cap remains unchanged.
-            max_total_fee_wei=5_000_000_000_000_000,
+            policy=kwargs["policy"], rpc=LocalForkReadAdapter(rpc),
         )
         reserve(db_path, campaign_id=kwargs["campaign_id"],
                 sequence=kwargs["sequence"], quote_id=kwargs["quote_id"],
@@ -293,6 +294,11 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             allowlist_path="local-only-allowlist",
             rpc_url="https://local-only.invalid",
             private_key=secret, max_capital_units=10_000_000,
+            signer_policy=SignerPolicy(
+                wallet, holder.lower(), (8453,),
+                (vault, destination) if destination else (vault,), (BASE_USDC,),
+                ("approve", "deposit", "withdraw"), 1_000_000,
+                5_000_000_000_000_000, 200_000_000_000_000),
         )
 
     patches = [
