@@ -1,0 +1,52 @@
+name: LVS unattended reliability checks
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 10 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-reliability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install project
+        run: python -m pip install -e ".[dev]"
+      - name: Repeat failure recovery and policy regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reliability-reports
+          for cycle in $(seq 1 12); do
+            echo "Cycle $cycle / 12"
+            python -m pytest -q \
+              tests/test_restart_fault_injection.py \
+              tests/test_auto_crash_windows.py \
+              tests/test_auto_journal.py \
+              tests/test_auto_lifecycle_fork.py \
+              tests/test_idle_campaign_rehearsal.py \
+              tests/test_pilot_config_preview.py \
+              tests/test_operator_status.py \
+              > "reliability-reports/cycle-${cycle}.txt" 2>&1 || {
+                cat "reliability-reports/cycle-${cycle}.txt"
+                exit 1
+              }
+          done
+          printf 'completed_cycles=12\npython=%s\nmainnet_transactions=0\n' ${{ matrix.python-version }} > reliability-reports/summary.txt
+      - name: Upload reports even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-python-${{ matrix.python-version }}
+          path: reliability-reports/
+          retention-days: 14
