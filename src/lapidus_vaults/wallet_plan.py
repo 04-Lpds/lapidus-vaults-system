@@ -144,7 +144,7 @@ class RebalancePreview:
         return sum(max(0, c.delta_units) for c in self.changes)
 
 
-def build_rebalance(snapshot: WalletSnapshot, policy: Policy) -> RebalancePreview:
+def build_rebalance(snapshot: WalletSnapshot, policy: Policy, *, managed_capital_cap_units: int | None = None) -> RebalancePreview:
     """Equal-weight USDC targets (capped) vs observed *estimated* wallet holdings."""
     if snapshot.chain_id != BASE_CHAIN or type(snapshot.rpc_block) is not int or snapshot.rpc_block < 0:
         raise ValueError('Wrong chain or invalid block')
@@ -158,13 +158,22 @@ def build_rebalance(snapshot: WalletSnapshot, policy: Policy) -> RebalancePrevie
                 type(h.share_balance) is not int or h.share_balance < 0 for h in snapshot.holdings)):
         raise ValueError('Invalid wallet holding balance')
     capital = snapshot.in_scope_capital_units
+    if managed_capital_cap_units is not None:
+        if (type(managed_capital_cap_units) is not int or
+            not 0 < managed_capital_cap_units <= 5_000_000 or
+            not managed_capital_cap_units <= capital <= managed_capital_cap_units + 1_000):
+            raise ValueError("Pilot capital outside strict cap and accounting-dust tolerance")
+        # Target weightings reference ONLY 5 USDC. The small excess remains
+        # idle, is never part of the autonomous managed budget, and cannot
+        # increase planned vault targets.
+        capital = managed_capital_cap_units
     deploy_budget = int((Decimal(capital) * (ONE - policy.idle_fraction)).to_integral_value(rounding=ROUND_DOWN))
     per_cap = int((Decimal(capital) * policy.per_vault_max_fraction).to_integral_value(rounding=ROUND_DOWN))
     target = min(per_cap, deploy_budget // len(policy.vault_addresses))
     changes = tuple(VaultChange(address, current[address].estimated_assets_units, target,
                                 target - current[address].estimated_assets_units)
                     for address in sorted(policy.vault_addresses))
-    target_idle = capital - target * len(changes)
+    target_idle = snapshot.in_scope_capital_units - target * len(changes)
     if snapshot.wallet_usdc_units + sum(-min(c.delta_units, 0) for c in changes) - sum(max(c.delta_units, 0) for c in changes) != target_idle:
         raise ValueError('Rebalance accounting did not reconcile')
     return RebalancePreview(snapshot, capital, target_idle, changes)

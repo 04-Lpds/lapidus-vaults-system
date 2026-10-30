@@ -20,15 +20,16 @@ from .rpc_verify import ReadOnlyRPC, RPCError
 from .wallet_plan import read_policy, read_wallet_snapshot, build_rebalance
 
 
-def observation_report(wallet: str, allowlist: str, rpc, morpho) -> dict:
+def observation_report(wallet: str, allowlist: str, rpc, morpho, *, managed_capital_cap_units: int | None = None) -> dict:
     """Monitor holdings without requiring ETH for future execution intentions."""
     policy = read_policy(allowlist)
     snapshot = read_wallet_snapshot(wallet, policy, rpc, morpho)
-    preview = build_rebalance(snapshot, policy)
+    preview = build_rebalance(snapshot, policy, managed_capital_cap_units=managed_capital_cap_units)
     return {
         "verification": "Morpho API / pinned Base RPC basic verification passed",
         "plan": {
             "chain_id": snapshot.chain_id,
+            "wallet": snapshot.wallet_address,
             "observed_block": snapshot.rpc_block,
             "capital_units": preview.capital_units,
             "wallet_usdc_units": snapshot.wallet_usdc_units,

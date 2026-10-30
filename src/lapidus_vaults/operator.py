@@ -16,23 +16,60 @@ def main(argv=None) -> int:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
+        ("idle-campaign-rehearsal", "Offline idle-capital candidate and campaign admission rehearsal"),
+        ("pilot-config-preview", "Validate proposed $20 limits without enabling live execution"),
+        ("status", "Read-only executor journal and latest allocation economics"),
+        ("risk-report", "Read-only offline vault/underlying market concentration report"),
         ("monitor", "Collect and persist a read-only live portfolio observation"),
+        ("shadow-decision", "Record read-only allocation drift and fee-vs-yield decision"),
+        ("shadow-watch", "Monitor and journal read-only live decisions every 15 minutes"),
+        ("shadow-service", "Bounded read-only Base monitoring service with fail-closed stop controls"),
+        ("scenario-admission", "Run offline synthetic rebalancing admission scenarios"),
+        ("scenario-campaign", "Rehearse admission into isolated SQLite campaigns"),
+        ("live-canary", "Explicit two-stage 0.5 USDC real Base cross-vault canary"),
+        ("live-pilot", "Bounded Base controller; keyless by default, explicit live opt-in"),
+        ("controller-once", "Keyless live observation to review-only campaign"),
         ("console", "Start the local supervised MetaMask console"),
         ("campaign-create", "Persist a read-only supervised rebalance campaign"),
         ("fork-rehearsal", "Run local Anvil campaign and receipt-bridge integration"),
         ("auto-fork", "Run an unattended campaign ONLY on a local Anvil Base fork"),
+        ("auto-once", "Experimental dedicated-wallet live executor; disabled unless explicitly enabled"),
+        ("auto-preflight", "Keyless read-only funded-wallet and campaign preflight"),
+        ("auto-campaign", "Execute existing limited trial campaign with receipt confirmation"),
+        ("auto-trial", "Create an exact 0.8 USDC non-executable executor campaign"),
+        ("signed-fork", "EIP-1559 signer test with disposable key on local Anvil"),
+        ("auto-lifecycle-fork", "Full signed auto campaign and restart recovery on local Anvil"),
     ):
         commands.add_parser(name, help=help_text, add_help=False)
     args, rest = parser.parse_known_args(argv)
     from . import monitor_once, local_console, fork_campaign_rehearsal
-    from .operations import create_campaign
+    from .operations import create_campaign, auto_once, auto_preflight, auto_trial_campaign, auto_campaign, shadow_decision, shadow_watch, synthetic_admission, synthetic_campaign_rehearsal, controller_once, shadow_service, live_pilot, live_canary, risk_gate, operator_status, pilot_config_preview, idle_campaign_rehearsal
+    from .testing import signed_fork_rehearsal, auto_lifecycle_fork
 
     runners = {
+        "idle-campaign-rehearsal": idle_campaign_rehearsal.main,
+        "pilot-config-preview": pilot_config_preview.main,
+        "status": operator_status.main,
+        "risk-report": risk_gate.main,
         "monitor": monitor_once.main,
+        "shadow-decision": shadow_decision.main,
+        "shadow-watch": shadow_watch.main,
+        "shadow-service": shadow_service.main,
+        "scenario-admission": synthetic_admission.main,
+        "scenario-campaign": synthetic_campaign_rehearsal.main,
+        "live-canary": live_canary.main,
+        "live-pilot": live_pilot.main,
+        "controller-once": controller_once.main,
         "console": local_console.main,
         "campaign-create": create_campaign.main,
         "fork-rehearsal": fork_campaign_rehearsal.main,
         "auto-fork": fork_campaign_rehearsal.main,
+        "auto-once": auto_once.main,
+        "auto-preflight": auto_preflight.main,
+        "auto-campaign": auto_campaign.main,
+        "auto-trial": auto_trial_campaign.main,
+        "signed-fork": signed_fork_rehearsal.main,
+        "auto-lifecycle-fork": auto_lifecycle_fork.main,
     }
     return int(runners[args.command](rest))
 

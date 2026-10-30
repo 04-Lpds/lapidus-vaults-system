@@ -1,0 +1,8 @@
+{
+  "managed_capital_usdc": "20",
+  "max_action_usdc": "1",
+  "cycle_seconds": 300,
+  "idle_deployment_horizon_days": 180,
+  "minimum_idle_deposit_usdc": "0.5",
+  "rebalance_drift_bps": 500
+}

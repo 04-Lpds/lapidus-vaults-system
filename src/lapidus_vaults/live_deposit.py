@@ -19,7 +19,11 @@ MAX_QUOTE_AGE_SECONDS=90
 MAX_BLOCK_AGE=10
 
 class DepositQuotes:
-    def __init__(self):
+    def __init__(self, *, min_gas_reserve_wei: int = MIN_GAS_RESERVE_WEI):
+        if (type(min_gas_reserve_wei) is not int or
+                not 0 < min_gas_reserve_wei <= MIN_GAS_RESERVE_WEI):
+            raise ValueError("Invalid deposit ETH reserve")
+        self.min_gas_reserve_wei = min_gas_reserve_wei
         self.pending={}
         self.consumed={}
 
@@ -38,7 +42,7 @@ class DepositQuotes:
         if wallet_usdc<amount_units:
             raise ValueError("Insufficient wallet USDC")
         eth=rpc.eth_balance(wallet,block)
-        if eth<MIN_GAS_RESERVE_WEI:
+        if eth<self.min_gas_reserve_wei:
             raise ValueError("Insufficient ETH gas reserve")
         allowance=rpc.call_uint(BASE_USDC,ALLOWANCE,block,_address_word(wallet),_address_word(vault))
         if allowance>MAX_UNITS:
@@ -66,7 +70,7 @@ class DepositQuotes:
         quoted_gas_price=rpc.gas_price_wei()
         if not 0<quoted_gas_price<=100_000_000_000:
             raise ValueError("Unsafe gas price quote")
-        if eth < MIN_GAS_RESERVE_WEI+gas_limit*quoted_gas_price*3:
+        if eth < self.min_gas_reserve_wei+gas_limit*quoted_gas_price*3:
             raise ValueError("ETH is insufficient for reserve and conservative gas estimate")
         # No estimate of Base L1-data fee or queued transactions: force manual review.
         quote_id=secrets.token_urlsafe(24)
