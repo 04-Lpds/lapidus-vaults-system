@@ -159,7 +159,7 @@ class DepositQuotes:
         if q["stage"]=="approve":
             after_allowance=rpc.call_uint(BASE_USDC,ALLOWANCE,block,
                                          _address_word(q["wallet"]),_address_word(q["vault"]))
-            delta_ok=cash_before==cash_after and shares_before==shares_after and after_allowance>=q["amount_units"]
+            delta_ok=cash_before==cash_after and shares_before==shares_after and after_allowance==q["amount_units"]
         else:
             delta_ok=(cash_before-cash_after==q["amount_units"]
                       and shares_after>shares_before)
@@ -172,6 +172,11 @@ class DepositQuotes:
         l1_fee_wei=int(l1_fee,16) if isinstance(l1_fee,str) else None
         fee_total_wei=(execution_fee_wei+l1_fee_wei) if execution_fee_wei is not None and l1_fee_wei is not None else None
         event_result=reconcile_transfer_logs(receipt,q["wallet"],q["vault"],q["amount_units"],q["stage"])
+        if q["stage"] == "withdraw" and "max_burned_shares" in q:
+            cap = q["max_burned_shares"]
+            delta_ok = (delta_ok and type(cap) is int and cap > 0
+                        and shares_before - shares_after <= cap
+                        and event_result["burned_shares"] <= cap)
         return {"status":"RECEIPT_AND_BLOCK_MATCH" if delta_ok and event_result["matched"] else "RECONCILIATION_MISMATCH",
                 "transaction_event_reconciliation":event_result,
                 "tx_hash":tx_hash,"matched":True,"block":block,

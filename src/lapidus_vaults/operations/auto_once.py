@@ -15,7 +15,6 @@ from pathlib import Path
 import sqlite3
 import sys
 import time
-import httpx
 
 from ..allocator import address_ok
 from ..client import MorphoClient
@@ -47,16 +46,8 @@ def execution_lock(db_path: str):
 def read_nonce(rpc_url: str, wallet: str, tag: str) -> int:
     if tag not in {"latest", "pending"}:
         raise ValueError("Invalid nonce block tag")
-    with httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as client:
-        response = client.post(rpc_url, json={
-            "jsonrpc": "2.0", "id": 1, "method": "eth_getTransactionCount",
-            "params": [wallet, tag],
-        })
-        response.raise_for_status()
-        data=response.json()
-    if data.get("error") or not isinstance(data.get("result"), str):
-        raise RuntimeError("Cannot establish dedicated wallet nonce")
-    return int(data["result"],16)
+    with ReadOnlyRPC(rpc_url) as rpc:
+        return rpc.transaction_count(wallet, tag)
 
 
 def _load_consumed(db_path: str, quote_id: str) -> dict:
@@ -193,7 +184,7 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
             with MorphoClient() as morpho:
                 report=build_live_readonly_plan(
                     wallet, allowlist_path,rpc,morpho,
-                    eth_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE)
+                    eth_reserve_wei=signer_policy.min_eth_reserve_wei)
             observed_units=report["plan"]["capital_units"]
             action=next_auto_action(db_path,policy=policy,
                                     observed_capital_units=observed_units,
@@ -208,7 +199,7 @@ def execute_once(*, db_path: str, wallet: str, protected_wallet: str,
             nonce_pending=read_nonce(rpc_url,policy.wallet,"pending")
             if nonce_latest!=nonce_pending:
                 raise RuntimeError("Dedicated wallet has other pending transactions")
-            deposits, withdrawals = DepositQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE), WithdrawalQuotes(min_gas_reserve_wei=DEDICATED_EXECUTOR_ETH_RESERVE)
+            deposits, withdrawals = DepositQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei), WithdrawalQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei)
             quote=quote_next_campaign_action(
                 db_path,wallet=policy.wallet,approved_vaults=approved_vaults,
                 rpc=rpc,deposits=deposits,withdrawals=withdrawals)

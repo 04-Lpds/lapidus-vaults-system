@@ -82,6 +82,7 @@ def test_preflight_requires_policy_and_preserves_fee_reserve(tmp_path, monkeypat
     rpc.block_number.return_value = 100
     rpc.eth_balance.return_value = eth
     rpc.gas_price_wei.return_value = 100_000_000
+    rpc.call_uint.return_value = 1
     monkeypatch.setattr(auto_preflight, "ReadOnlyRPC", lambda _: nullcontext(rpc))
     monkeypatch.setattr(auto_preflight, "MorphoClient", lambda: nullcontext(Mock()))
     monkeypatch.setattr(auto_preflight, "read_policy", lambda _: type("Policy", (), {"vault_addresses":(vault,)})())
@@ -89,7 +90,7 @@ def test_preflight_requires_policy_and_preserves_fee_reserve(tmp_path, monkeypat
     monkeypatch.setattr(auto_preflight, "next_auto_action", lambda *a, **kw: {
         "status":"AUTO_POLICY_PASSED_AWAITING_SECURE_SIGNER", "method":"deposit_intent",
         "amount_units":800_000, "campaign_id":"campaign", "sequence":1})
-    quote = Mock(return_value={"gas":"0x186a0", "stage":"deposit", "amount_units":800_000})
+    quote = Mock(return_value={"gas":"0x186a0", "stage":"deposit", "amount_units":800_000, "data":"0x"})
     monkeypatch.setattr(auto_preflight, "quote_next_campaign_action", quote)
     result = preflight(db_path=str(db), wallet=WALLET, protected_wallet=PROTECTED,
                        allowlist_path="unused", rpc_url="https://example.invalid")

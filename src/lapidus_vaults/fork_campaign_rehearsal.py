@@ -42,7 +42,7 @@ class LocalForkReadAdapter(ReadOnlyRPC):
         reads = {
             "eth_chainId", "eth_blockNumber", "eth_getCode", "eth_call",
             "eth_getBalance", "eth_estimateGas", "eth_gasPrice",
-            "eth_getTransactionReceipt", "eth_getTransactionByHash",
+            "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getTransactionCount",
         }
         if method not in reads:
             raise ValueError("Read adapter cannot execute transactions")

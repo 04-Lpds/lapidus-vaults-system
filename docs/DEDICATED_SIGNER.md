@@ -62,8 +62,9 @@ existing portfolio policy still caps capital at 10 USDC. Reserve bounds are
 0.0002–0.002 ETH. Use the previous 0.00005 ETH transaction fee ceiling or a lower
 one for conservative configuration. An explicit fee ceiling may be at most
 0.005 ETH, matching the pre-existing signer override bound; local fork harnesses
-use that upper ceiling for synthetic fork gas prices. This is an L2 execution
-fee bound, not a complete Base L1-data-fee estimate. No operational policy file,
+use that upper ceiling for synthetic fork gas prices. The fee budget now combines maximum L2 execution
+gas with twice the current Base oracle L1 fee bound. This is a conservative
+current-state estimate, not an inclusion-time guarantee. No operational policy file,
 key, live opt-in, scheduler, or broadcasting configuration is created by this
 change. Protect policy integrity alongside campaign DB and process access.
 
@@ -75,7 +76,8 @@ change. Protect policy integrity alongside campaign DB and process access.
   rechecks fresh read-only RPC state, and signs without broadcasting.
 - `reserve_and_broadcast` first checks the exact persisted campaign binding,
   invokes signing against the same RPC endpoint used for broadcast, reserves
-  the journal, saves the deterministic hash, then attempts one raw send.
+  the journal, saves the deterministic hash, then rechecks state/nonce/budget and authority under a database write lock
+  before attempting one raw send.
   Unknown responses/timeouts retain that hash and block retry. Receipt/event/
   block reconciliation must complete before the campaign advances.
 
@@ -85,8 +87,8 @@ vault, amount caps, zero ETH value, nonce/gas bounds and maximum EIP-1559 fee.
 Fresh verification requires a recent persisted authorization (90 seconds,
 10 blocks, no future observations), contract bytecode, asset identity, balances,
 allowance safety, current simulation and gas estimates. Withdrawals retain the
-reviewed share-burn ceiling. The final balance check preserves the configured
-ETH reserve even at the actual transaction maximum fee. No RPC result means no
+reviewed share-burn ceiling. The final balance check budgets the configured
+ETH reserve plus maximum L2 execution fee and the buffered current L1 bound. No RPC result means no
 signature. The existing RPC/API verification and wallet reconciliation in the
 runner remain prerequisites; a signature alone does not authorize execution.
 
@@ -131,19 +133,22 @@ Python policy checks or read its key. Policy enforcement is not an on-chain
 permission boundary. Review external signer/HSM integration and tamper-resistant
 policy storage before production custody.
 
+See [the adversarial audit](V0.7_SIGNER_SECURITY_AUDIT.md) for confirmed defects,
+fixes, severity rankings and outstanding fork validation.
+
 RPC reads are pinned by height, not block hash; reorgs, provider dishonesty and
 changes after simulation remain possible. ERC-4626 deposit/withdraw do not carry
-on-chain slippage bounds here. L1 data fees, persistent spend budgets, strategy
+on-chain slippage bounds here. Future Base fee changes, persistent spend budgets, strategy
 loss limits, independent vault risk approval, monitoring/alerts, and deployment
 health controls need further work. API/RPC consistency is not an economic risk
-assessment. The read-only RPC abstraction has no transaction-count method;
-the existing runner's separate nonce transport remains in place.
+assessment. Nonce reads now use the validated read-only RPC abstraction, including
+the local-fork adapter.
 
 Local signed Anvil runs, multi-version Python CI, operational crash/restart
 rehearsals and independent security review remain required before any live
 rollout. No production-readiness claim is made.
 
-## Validation in this workspace
+## Initial PR validation in this workspace
 
 Python 3.12, with the repository's declared dev dependencies installed:
 

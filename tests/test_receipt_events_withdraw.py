@@ -119,3 +119,63 @@ def test_withdraw_consume_rejects_fresh_estimate_above_existing_gas_limit():
     rpc.estimate_gas.return_value=270001
     with pytest.raises(ValueError,match="Fresh gas estimate exceeds"):
         engine.consume(rpc,quote["quote_id"])
+
+
+@pytest.mark.parametrize("case", ["exact", "missing", "excess", "wrong_spender", "transfer"])
+def test_approval_requires_exact_transaction_scoped_event(case):
+    from lapidus_vaults.receipt_events import APPROVAL_TOPIC
+    amount = 800000
+    log = {"address":BASE_USDC,
+           "topics":[APPROVAL_TOPIC, "0x"+"0"*24+ACTOR[2:],
+                     "0x"+"0"*24+(VAULTS[1] if case == "wrong_spender" else VAULTS[0])[2:]],
+           "data":"0x"+f"{amount+(1 if case == 'excess' else 0):064x}"}
+    logs = [] if case == "missing" else [log]
+    if case == "transfer":
+        logs.append(transfer(BASE_USDC, ACTOR, VAULTS[0], 1))
+    result = reconcile_transfer_logs({"logs":logs}, ACTOR, VAULTS[0], amount, "approve")
+    assert result["matched"] is (case == "exact")
+
+
+def test_approval_receipt_rejects_excess_allowance_despite_exact_event():
+    from lapidus_vaults.live_deposit import DepositQuotes
+    from lapidus_vaults.receipt_events import APPROVAL_TOPIC
+    from lapidus_vaults.rpc_verify import _address_word, _word
+    engine = DepositQuotes()
+    amount = 800000
+    data = "0x095ea7b3" + _address_word(VAULTS[0]) + _word(amount)
+    q = dict(wallet=ACTOR, vault=VAULTS[0], to=BASE_USDC, stage="approve", amount_units=amount,
+             data=data, observed_block=100)
+    engine.consumed["quote"] = q
+    tx_hash = "0x"+"ab"*32
+    rpc = Mock()
+    rpc.chain_id.return_value = 8453
+    rpc.call_uint.side_effect = lambda token, selector, block, *words: amount+1 if selector == "0xdd62ed3e" else 100
+    rpc.request.side_effect = lambda method, params: (
+        {"hash":tx_hash, "from":ACTOR, "to":BASE_USDC, "input":data, "value":"0x0", "chainId":"0x2105"}
+        if method == "eth_getTransactionByHash" else
+        {"transactionHash":tx_hash,"status":"0x1","blockNumber":"0x65","gasUsed":"0x10000",
+         "logs":[{"address":BASE_USDC, "topics":[APPROVAL_TOPIC,"0x"+_address_word(ACTOR),
+                   "0x"+_address_word(VAULTS[0])],"data":"0x"+_word(amount)}]})
+    assert engine.check_receipt(rpc, "quote", tx_hash)["status"] == "RECONCILIATION_MISMATCH"
+
+
+def test_withdrawal_receipt_must_respect_reviewed_share_ceiling():
+    from lapidus_vaults.rpc_verify import _word, _address_word
+    engine = WithdrawalQuotes()
+    amount, cap = 800000, 1000
+    data = "0xb460af94"+_word(amount)+_address_word(ACTOR)+_address_word(ACTOR)
+    engine.consumed["quote"] = dict(wallet=ACTOR, vault=VAULTS[0], to=VAULTS[0],
+        stage="withdraw", amount_units=amount, data=data, observed_block=100, max_burned_shares=cap)
+    tx_hash = "0x"+"ab"*32
+    rpc = Mock()
+    rpc.chain_id.return_value = 8453
+    def balance(token, selector, block, *words):
+        if token == BASE_USDC: return 0 if block == 100 else amount
+        return 10000 if block == 100 else 10000-cap-1
+    rpc.call_uint.side_effect = balance
+    rpc.request.side_effect = lambda method, params: (
+        {"hash":tx_hash,"from":ACTOR,"to":VAULTS[0],"input":data,"value":"0x0","chainId":"0x2105"}
+        if method == "eth_getTransactionByHash" else
+        {"transactionHash":tx_hash,"status":"0x1","blockNumber":"0x65","gasUsed":"0x10000",
+         "logs":[transfer(BASE_USDC, VAULTS[0], ACTOR, amount), transfer(VAULTS[0], ACTOR, ZERO, cap+1)]})
+    assert engine.check_receipt(rpc, "quote", tx_hash)["status"] == "RECONCILIATION_MISMATCH"

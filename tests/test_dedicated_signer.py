@@ -32,7 +32,7 @@ def make(stage="approve", amount=AMOUNT):
                 "data":data,"gas":"0x186a0","value":"0x0",
                 "observed_block":100,"authorized_at_unix":time.time(),
                 "max_burned_shares":1_000_100}
-    candidate = {"chain_id":8453,"from_address":wallet,"to_address":dest,
+    candidate = {"chain_id":8453,"value_wei":0,"from_address":wallet,"to_address":dest,
                  "data":data,"requested_assets_units":amount,
                  "method":stage+"_intent"}
     return a,key,consumed,candidate
@@ -94,6 +94,7 @@ def make_policy(wallet):
 def make_rpc(stage):
     rpc = Mock()
     rpc.chain_id.return_value = 8453
+    rpc.transaction_count.return_value = 0
     rpc.block_number.return_value = 100
     rpc.contract_exists.return_value = True
     rpc.call_address.return_value = BASE_USDC
@@ -248,12 +249,14 @@ def test_broadcast_is_journaled_before_transport_and_never_retried(tmp_path, mon
     a, key, c, plan = make()
     db_path = str(tmp_path / "journal.sqlite")
     with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE rebalance_campaign_steps (campaign_id TEXT, sequence INTEGER, status TEXT, tx_hash TEXT)")
         db.execute("CREATE TABLE rebalance_campaign_quote_bindings (campaign_id TEXT, sequence INTEGER, quote_id TEXT)")
-        db.execute("CREATE TABLE live_deposit_authorizations (quote_id TEXT, transaction_json TEXT)")
-        db.execute("CREATE TABLE rebalance_campaigns (campaign_id TEXT, plan_json TEXT, state TEXT)")
+        db.execute("CREATE TABLE live_deposit_authorizations (quote_id TEXT, transaction_json TEXT, wallet TEXT, vault TEXT, stage TEXT, amount_units INTEGER)")
+        db.execute("CREATE TABLE rebalance_campaigns (campaign_id TEXT, plan_json TEXT, state TEXT, wallet TEXT)")
         db.execute("INSERT INTO rebalance_campaign_quote_bindings VALUES ('campaign',1,'quote')")
-        db.execute("INSERT INTO live_deposit_authorizations VALUES (?,?)", ("quote", json.dumps(c)))
-        db.execute("INSERT INTO rebalance_campaigns VALUES (?,?,?)", ("campaign", json.dumps([plan]), "ACTIVE"))
+        db.execute("INSERT INTO live_deposit_authorizations VALUES (?,?,?,?,?,?)",
+                   ("quote", json.dumps(c), c["wallet"], c["vault"], c["stage"], c["amount_units"]))
+        db.execute("INSERT INTO rebalance_campaigns VALUES (?,?,?,?)", ("campaign", json.dumps([plan]), "ACTIVE", c["wallet"]))
     rpc = make_rpc("approve")
     monkeypatch.setattr(module, "ReadOnlyRPC", lambda _: nullcontext(rpc))
     sends = []
@@ -298,9 +301,10 @@ def test_no_binding_means_no_key_access_or_rpc(tmp_path, monkeypatch):
     a, key, c, plan = make()
     path = str(tmp_path / "empty.sqlite")
     with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE rebalance_campaign_steps (campaign_id TEXT, sequence INTEGER, status TEXT, tx_hash TEXT)")
         db.execute("CREATE TABLE rebalance_campaign_quote_bindings (campaign_id TEXT, sequence INTEGER, quote_id TEXT)")
-        db.execute("CREATE TABLE live_deposit_authorizations (quote_id TEXT, transaction_json TEXT)")
-        db.execute("CREATE TABLE rebalance_campaigns (campaign_id TEXT, plan_json TEXT, state TEXT)")
+        db.execute("CREATE TABLE live_deposit_authorizations (quote_id TEXT, transaction_json TEXT, wallet TEXT, vault TEXT, stage TEXT, amount_units INTEGER)")
+        db.execute("CREATE TABLE rebalance_campaigns (campaign_id TEXT, plan_json TEXT, state TEXT, wallet TEXT)")
     rpc = Mock(side_effect=AssertionError("must not read RPC"))
     monkeypatch.setattr(module, "ReadOnlyRPC", rpc)
     with pytest.raises(ValueError, match="persisted campaign authorization"):

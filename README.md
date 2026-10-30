@@ -88,6 +88,8 @@ Dedicated execution requires a separate public `LVS_SIGNER_POLICY` JSON file
 with explicit execution/protected addresses and chain, asset, vault and operation
 allowlists. Missing or mismatched policy blocks signing; no alternate wallet is
 used. See [signer configuration, architecture audit and local testing](docs/DEDICATED_SIGNER.md).
+See also the [adversarial audit and unresolved risks](docs/V0.7_SIGNER_SECURITY_AUDIT.md)
+and [Codex Anvil setup procedure](docs/CODEX_ANVIL_SETUP.md).
 This change does not enable live execution or configure a mainnet scheduler.
 
 ## Project structure

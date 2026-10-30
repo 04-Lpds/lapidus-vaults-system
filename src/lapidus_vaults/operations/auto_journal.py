@@ -45,6 +45,14 @@ def reserve(db_path: str, *, campaign_id: str, sequence: int, quote_id: str,
     with sqlite3.connect(db_path, timeout=10) as db:
         db.execute("BEGIN IMMEDIATE")
         _schema(db)
+        # Cross-campaign uncertainty also blocks a new reservation. This check
+        # shares the write transaction with insertion, including direct callers.
+        unresolved = db.execute(
+            "SELECT campaign_id FROM autonomous_submissions "
+            "WHERE state!='CONFIRMED' AND campaign_id!=? LIMIT 1", (campaign_id,)
+        ).fetchone()
+        if unresolved:
+            raise ValueError("Prior autonomous transaction unresolved; never resend")
         exists = db.execute(
             "SELECT sequence,state,quote_id FROM autonomous_submissions "
             "WHERE campaign_id=? OR quote_id=?", (campaign_id, quote_id)
@@ -53,7 +61,7 @@ def reserve(db_path: str, *, campaign_id: str, sequence: int, quote_id: str,
             raise ValueError("Duplicate autonomous reservation; never resend")
         if any(row[1] != "CONFIRMED" for row in exists):
             raise ValueError("Prior autonomous transaction unresolved; never resend")
-        if exists and (max(row[0] for row in exists) + 1 != sequence):
+        if (not exists and sequence != 1) or (exists and max(row[0] for row in exists) + 1 != sequence):
             raise ValueError("Autonomous sequence must advance exactly once")
         db.execute("""INSERT INTO autonomous_submissions VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (campaign_id, sequence, quote_id, wallet.lower(), to_address.lower(),

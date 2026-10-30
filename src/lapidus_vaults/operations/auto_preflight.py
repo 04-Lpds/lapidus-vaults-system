@@ -21,7 +21,7 @@ from .autopilot_policy import AutoPolicy, next_auto_action
 from .campaign_quote import quote_next_campaign_action
 from ..live_deposit import DepositQuotes
 from ..live_withdraw import WithdrawalQuotes
-from .dedicated_signer import MAX_GAS_LIMIT
+from .dedicated_signer import MAX_GAS_LIMIT, execution_fee_budget
 from .signer_policy import load_signer_policy
 
 
@@ -102,11 +102,13 @@ def preflight(*, db_path: str, wallet: str, protected_wallet: str,
             rpc=rpc,deposits=DepositQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei),
             withdrawals=WithdrawalQuotes(min_gas_reserve_wei=signer_policy.min_eth_reserve_wei))
         gas=int(q["gas"],16)
-        worst_fee=gas*gas_price*2
+        worst_fee, l1_budget = execution_fee_budget(rpc=rpc, data=q["data"], gas=gas,
+            max_fee_per_gas=gas_price * 2, block=rpc.block_number())
         result.update(
             campaign_id=action["campaign_id"],sequence=action["sequence"],
             stage=q["stage"],amount_units=q["amount_units"],
             estimated_gas_limit=gas,worst_case_fee_wei=worst_fee,
+            l1_fee_budget_wei=l1_budget,
             gas_cap_passed=(gas<=MAX_GAS_LIMIT and
                             worst_fee<=signer_policy.max_total_fee_wei),
             funded_for_worst_case_fee=eth_wei>=signer_policy.min_eth_reserve_wei+worst_fee,

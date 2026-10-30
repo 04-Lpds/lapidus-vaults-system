@@ -67,7 +67,7 @@ def run_signed_fork(rpc: ForkRPC, holder: str, vault: str) -> dict:
             raise RuntimeError("Expected exact approve -> deposit progression")
         consumed=engine.consume(read,quote["quote_id"])
         consumed["authorized_at_unix"] = time.time()
-        candidate={"method":expected_stage+"_intent","chain_id":8453,
+        candidate={"method":expected_stage+"_intent","chain_id":8453,"value_wei":0,
                    "from_address":wallet,"to_address":consumed["to"],
                    "data":consumed["data"],"requested_assets_units":amount}
         nonce=int(rpc.call("eth_getTransactionCount",[wallet,"pending"]),16)

@@ -94,7 +94,7 @@ class ReadOnlyRPC:
         self.close()
 
     def request(self, method: str, params: list[Any]) -> Any:
-        if method not in {'eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionReceipt', 'eth_getTransactionByHash'}:
+        if method not in {'eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getTransactionCount'}:
             raise ValueError('Only read-only JSON-RPC methods are permitted')
         self._next_id += 1
         try:
@@ -105,7 +105,7 @@ class ReadOnlyRPC:
             obj = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             # Avoid leaking a credential-bearing RPC URL in exception messages.
-            raise RPCError(f'{method} request failed (verify connectivity and RPC provider)') from exc
+            raise RPCError(f'{method} request failed (verify connectivity and RPC provider)') from None
         if not isinstance(obj, dict) or obj.get('id') != self._next_id:
             raise RPCError(f'Invalid RPC response envelope for {method}')
         if obj.get('error') is not None:
@@ -122,6 +122,12 @@ class ReadOnlyRPC:
 
     def block_number(self) -> int:
         return _hex_uint(self.request('eth_blockNumber', []), 'block_number')
+
+    def transaction_count(self, wallet: str, tag: str) -> int:
+        """Read the mined/pending nonce without a separate network transport."""
+        if not address_ok(wallet) or tag not in {"latest", "pending"}:
+            raise ValueError("Invalid nonce address or block tag")
+        return _hex_uint(self.request("eth_getTransactionCount", [wallet, tag]), "nonce")
 
     def gas_price_wei(self) -> int:
         """Current RPC gas quote, not a pinned-block or future guarantee."""
