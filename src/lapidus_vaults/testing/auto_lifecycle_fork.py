@@ -54,7 +54,7 @@ class _PendingOnce(DepositQuotes):
         }
 
 
-def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str = "profitable", destination: str | None = None) -> dict:
+def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str = "profitable", destination: str | None = None, inject_post_broadcast_crash: bool = False) -> dict:
     if scenario not in {"profitable", "uneconomic", "tampered"}:
         raise ValueError("Unknown synthetic fork scenario")
     addr_word(holder)
@@ -225,6 +225,8 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             raise RuntimeError("Unexpected additional send")
         _send(rpc, signed["raw"], signed["tx_hash"])
         sends.append(signed["tx_hash"])
+        if inject_post_broadcast_crash and len(sends) == 1:
+            raise RuntimeError("INJECTED_CRASH_AFTER_BROADCAST")
         return {"state": "SUBMITTED", "tx_hash": signed["tx_hash"]}
 
     def nonce(_url, address, tag):
@@ -254,7 +256,19 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
         from ..operations.campaigns import read_campaign
         observations = []
         for i in range(len(actions)):
-            submitted = step()
+            if i == 0 and inject_post_broadcast_crash:
+                try:
+                    step()
+                except RuntimeError as exc:
+                    if str(exc) != "INJECTED_CRASH_AFTER_BROADCAST":
+                        raise
+                else:
+                    raise RuntimeError("Crash injection failed to trigger")
+                if len(sends) != 1 or current(db_path,campaign_id)[0]["state"] != "SUBMITTED":
+                    raise RuntimeError("Crash lost hash journal")
+                submitted = {"state":"SUBMITTED","tx_hash":sends[0]}
+            else:
+                submitted = step()
             if submitted.get("state") != "SUBMITTED" or len(sends) != i + 1:
                 raise RuntimeError(f"Autonomous step {i + 1} not submitted")
             observations.append(submitted)
@@ -296,6 +310,7 @@ def run_auto_lifecycle(rpc: ForkRPC, holder: str, vault: str, *, scenario: str =
             "signed_transactions": sends,
             "journal": journal,
             "pending_without_resend": True,
+            "post_broadcast_crash_injected": inject_post_broadcast_crash,
             "recovered_after_restart": True,
             "repeated_submission_count": len(sends),
             "mainnet_broadcast": False,
@@ -316,10 +331,11 @@ def main(argv=None):
     parser.add_argument("--vault", required=True, choices=VAULTS)
     parser.add_argument("--destination", choices=VAULTS, help="Optional destination vault for unattended cross-vault lifecycle")
     parser.add_argument("--scenario", choices=("profitable", "uneconomic", "tampered"), default="profitable")
+    parser.add_argument("--inject-post-broadcast-crash",action="store_true")
     args = parser.parse_args(argv)
     try:
         with ForkRPC(args.fork_rpc) as rpc:
-            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault, scenario=args.scenario, destination=args.destination)
+            report = run_auto_lifecycle(rpc, args.usdc_holder, args.vault, scenario=args.scenario, destination=args.destination, inject_post_broadcast_crash=args.inject_post_broadcast_crash)
         print(json.dumps(report, indent=2))
         print("LOCAL ANVIL ONLY. No mainnet signing or broadcast.")
         return 0
